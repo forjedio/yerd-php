@@ -83,7 +83,18 @@ foreach ($minors as $minor) {
             // Brand-new (minor, target) — first build of this patch.
             $revision = 1; $reason = 'new build';
         } elseif ($prev['php'] !== $php) {
-            // Upstream shipped a new patch — reset the revision.
+            if (version_compare($php, $prev['php'], '<')) {
+                // DOWNGRADE: the resolved "latest" patch is LOWER than what's
+                // already published — almost always a transient php.net read.
+                // Never regress the manifest: refuse it, keep the published
+                // build, and don't reset the revision (which would break the
+                // monotonic (patch,revision) auto-heal contract, §7). Loud so a
+                // genuine upstream retraction is noticed.
+                fwrite(STDERR, "  WARN: resolved $php < published {$prev['php']} for $minor {$t['os']}-{$t['arch']} — refusing downgrade\n");
+                $summary[] = "  skip  $php {$t['os']}-{$t['arch']} (refused downgrade from {$prev['php']})";
+                continue;
+            }
+            // Genuine newer patch — reset the revision.
             $revision = 1; $reason = "new patch {$prev['php']} -> $php";
         } elseif ($force) {
             // Rebuild of an unchanged patch (c-ares cutover, spc bump, security).

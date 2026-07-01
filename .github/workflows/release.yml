@@ -40,14 +40,39 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.3"
+      - name: Pre-flight — signing key present (fail fast, before any build)
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PUBLIC_KEY: ${{ vars.MINISIGN_PUBLIC_KEY }}
+        run: |
+          # Validate the signing config up front so a missing secret fails in
+          # seconds instead of after hours of paid macOS/Linux build time.
+          [ -n "$MINISIGN_SECRET_KEY" ] || { echo "FATAL: secret MINISIGN_SECRET_KEY is not set — run scripts/keygen.sh and configure it."; exit 1; }
+          [ -n "$MINISIGN_PUBLIC_KEY" ] || { echo "FATAL: variable MINISIGN_PUBLIC_KEY is not set — the sign self-verify and §10.8 sanity-check require it."; exit 1; }
+          echo "signing config present."
       - name: Fetch previously-published manifest (§10.1)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           source scripts/config.sh
-          base="$(release_base_url "$GITHUB_REPOSITORY")"
-          # First run has no manifest — 404 is fine, resolve treats it as empty.
-          curl -fsSL "$base/$MANIFEST_NAME" -o old-manifest.json || echo '{}' > old-manifest.json
+          # Distinguish "genuine first run" (no rolling release yet) from a
+          # transient fetch failure. Defaulting a fetch error to '{}' would make
+          # resolve treat every target as new and RESET every revision to 1,
+          # wiping the auto-heal history (§7) for all installs. So: only an
+          # absent release is "empty"; anything else is fatal.
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "No rolling '$RELEASE_TAG' release yet — first run, empty manifest."
+            echo '{}' > old-manifest.json
+          else
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --pattern "$MANIFEST_NAME" --output old-manifest.json --clobber \
+              || { echo "FATAL: release exists but $MANIFEST_NAME could not be downloaded — aborting (a default-empty here would reset all revisions)."; exit 1; }
+            n="$(jq -r '(.builds // []) | length' old-manifest.json 2>/dev/null || echo x)"
+            case "$n" in
+              ''|x|0) echo "FATAL: fetched $MANIFEST_NAME is invalid or has no builds[] — refusing (would reset revisions)."; exit 1 ;;
+              *) echo "Previous manifest OK ($n builds)." ;;
+            esac
+          fi
       - name: Resolve build matrix (§7 revision algorithm)
         id: resolve
         run: |

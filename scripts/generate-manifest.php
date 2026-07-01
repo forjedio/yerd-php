@@ -121,6 +121,23 @@ foreach ($builds as $b) {
     $seen[$key] = true;
 }
 
+// Completeness warning (§7): for every (os,arch) the manifest already covers,
+// each supported minor should be present. A brand-new minor not yet built may be
+// legitimately absent (yerd treats it as uninstallable — graceful), so this
+// WARNS rather than fails — but it surfaces the silent-gap case (e.g. an
+// `only_minor` rebuild that never emitted a newly-added minor's entries).
+$targetsSeen = $present = [];
+foreach ($builds as $b) {
+    $targetsSeen["{$b['os']}|{$b['arch']}"] = true;
+    $present["{$b['minor']}|{$b['os']}|{$b['arch']}"] = true;
+}
+$missing = [];
+foreach (array_keys($supported) as $m)
+    foreach (array_keys($targetsSeen) as $ta)
+        if (!isset($present["$m|$ta"])) $missing[] = "$m " . str_replace('|', '-', $ta);
+if ($missing)
+    fwrite(STDERR, "generate-manifest: WARNING — supported build(s) absent from manifest: " . implode(', ', $missing) . "\n");
+
 $manifest = ['schema' => $schema, 'generated_at' => $generated, 'builds' => $builds];
 echo json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n";
 fwrite(STDERR, "generate-manifest: " . count($builds) . " build(s) written.\n");

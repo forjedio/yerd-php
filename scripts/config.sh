@@ -19,7 +19,10 @@ EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,event,exif,fileinfo,filt
 # (curl.php is under upstream refactor — RFC #959/#963). The §3 patch step
 # fails the build if the patch matches nothing, and §5 is the runtime backstop.
 SPC_REPO="https://github.com/crazywhalecc/static-php-cli.git"
-SPC_REF="2.7.1"
+# 2.8.5 is the first ref that supports PHP 8.5 (2.7.x tops out at 8.4). The §3
+# patch (apply-curl-patch.sh) is verified against this ref's curl.php layout;
+# re-verify on every bump — the c-ares option location is under upstream churn.
+SPC_REF="2.8.5"
 
 # --- Cross-repo ABI partner (§5.4) --------------------------------------------
 # forjedio/yerd-php-ext publishes yerd-dump.so / pcov.so that get dlopen'ed into

@@ -46,18 +46,36 @@ grep -iq "opcache" <<<"$mods" || fail "opcache missing from php -m"
 echo "  bulk-set critical modules present."
 
 echo "== §5.3 php-fpm -t (valid config) =="
-"$FPM" -t 2>&1 | tee /tmp/fpm-test.log | grep -qi "successful\|test is successful" || \
-  { cat /tmp/fpm-test.log; fail "php-fpm -t did not report a valid configuration"; }
+# A freshly-built static php-fpm has no default config file, so a bare `-t`
+# fails with "failed to open configuration file" even on a perfectly good
+# binary. Point it at a minimal valid config so `-t` actually exercises the
+# binary rather than the (absent) default path.
+fpmconf="$(mktemp)"; fpmlog="$(mktemp)"
+cat > "$fpmconf" <<'CONF'
+[global]
+error_log = /dev/stderr
+[www]
+listen = 127.0.0.1:9000
+pm = static
+pm.max_children = 1
+CONF
+"$FPM" -t -y "$fpmconf" >"$fpmlog" 2>&1 || true
+cat "$fpmlog"
+grep -qi "successful" "$fpmlog" || fail "php-fpm -t did not report a valid configuration"
+rm -f "$fpmconf" "$fpmlog"
 
 echo "== §5.4 real extension load (cross-repo ABI gate) =="
 # Preferred, authoritative gate: download the matching yerd-php-ext .so for this
 # (minor, os, arch) and really load it. Only for a brand-new minor with no
 # published ext do we fall back to asserting ZEND_MODULE_API_NO.
-so=""
+so=""; tmp=""
 if [ -n "${EXT_SO:-}" ] && [ -f "${EXT_SO}" ]; then
   so="$EXT_SO"
 elif command -v gh >/dev/null 2>&1; then
   # yerd-php-ext publishes per (minor, os, arch); try to fetch yerd-dump.so.
+  # NOTE: yerd-php-ext currently ships NO macos-x86_64 asset, so the Intel-mac
+  # leg always takes the ZEND_MODULE_API_NO fallback below (by design, until the
+  # ext adds Intel or yerd drops that target — §1 contingency).
   tmp="$(mktemp -d)"
   pat="yerd-dump-${MINOR}-${OS}-${ARCH}.so"
   if gh release download --repo "$EXT_REPO" --pattern "$pat" --dir "$tmp" 2>/dev/null; then
@@ -85,5 +103,6 @@ else
   echo "  ZEND_MODULE_API_NO got=$got want=$want"
   [ "$got" = "$want" ] || fail "ZEND_MODULE_API_NO mismatch (got '$got', want '$want')"
 fi
+[ -n "$tmp" ] && rm -rf "$tmp"
 
 echo "VERIFY OK: $MINOR $OS-$ARCH"
