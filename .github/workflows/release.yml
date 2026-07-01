@@ -39,7 +39,7 @@ jobs:
       - name: Set up PHP (tooling)
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.3"
+          php-version: "8.4"
       - name: Pre-flight — signing key present (fail fast, before any build)
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
@@ -110,7 +110,7 @@ jobs:
       - name: Set up PHP (tooling on host)
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.3"
+          php-version: "8.4"
       - name: Build ${{ matrix.name }} (§4)
         run: bash scripts/build-target.sh "${{ matrix.minor }}" "${{ matrix.os }}"
       - name: Verify §5 gate
@@ -145,7 +145,7 @@ jobs:
       - name: Set up PHP (tooling)
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.3"
+          php-version: "8.4"
       - name: Install minisign
         run: sudo apt-get update && sudo apt-get install -y minisign
       - name: Download resolve outputs
