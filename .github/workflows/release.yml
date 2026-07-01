@@ -112,6 +112,12 @@ jobs:
         with:
           php-version: "8.4"
       - name: Build ${{ matrix.name }} (§4)
+        env:
+          # spc's --prefer-pre-built fetches dependency packages from the
+          # static-php-cli-hosted releases via api.github.com; unauthenticated
+          # CI shares IPs and hits the 60-req/hr limit (HTTP 403). spc reads
+          # GITHUB_TOKEN (CurlHook::setupGithubToken) to authenticate.
+          GITHUB_TOKEN: ${{ github.token }}
         run: bash scripts/build-target.sh "${{ matrix.minor }}" "${{ matrix.os }}"
       - name: Verify §5 gate
         env:
