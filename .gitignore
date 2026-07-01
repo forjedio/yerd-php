@@ -1,0 +1,16 @@
+# Never commit signing keys (§6) — secret half lives only in Actions secrets.
+/keys/
+*.key
+*.minisig
+# Build tree & artifacts
+/static-php-cli/
+/downloads/
+/buildroot/
+/dist/
+/*.tar.gz
+# Local test scratch
+/latest.json
+/targets.json
+/matrix.json
+/old-manifest.json
+/php.json
