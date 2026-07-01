@@ -33,6 +33,12 @@ fi
 
 cd "$SPC_DIR"
 
+# static-php-cli is a Composer project: a git checkout has no vendor/, so bin/spc
+# can't autoload until its deps are installed. (The gnu-docker wrapper installs
+# deps inside the container, but the native bin/spc runs on the host and needs
+# this.) Canonical setup step — must run before any bin/spc invocation.
+composer install --no-dev --no-interaction --optimize-autoloader
+
 # --- Build pipeline (§4) ------------------------------------------------------
 "$CMD" doctor --auto-fix
 "$CMD" download --with-php="$MINOR" --for-extensions="$EXTENSIONS" --prefer-pre-built --retry=5
