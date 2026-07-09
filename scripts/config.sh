@@ -12,7 +12,21 @@ SUPPORTED_MINORS="8.2 8.3 8.4 8.5"
 # --- Extension set — the "bulk" set (§1) --------------------------------------
 # Keep in sync with what yerd expects. Passed to spc as a single comma string.
 # NOTE: keep `swoole` (we still drop c-ares from *curl* via the §3 patch).
-EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,event,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,opentelemetry,pcntl,pdo,pdo_mysql,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,swoole,swoole-hook-mysql,swoole-hook-pgsql,swoole-hook-sqlite,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
+#
+# pdo_pgsql / pdo_sqlite are the REAL upstream PDO extensions — deliberately NOT
+# swoole-hook-pgsql / swoole-hook-sqlite. Swoole's vendored forks register a
+# `pgsql`/`sqlite` PDO *driver* WITHOUT ever registering the pdo_pgsql/pdo_sqlite
+# *module*, so extension_loaded('pdo_pgsql') stays false and `php -m` omits it
+# even though PDO::getAvailableDrivers() lists the driver — which silently breaks
+# `composer install` platform checks for ext-pdo_pgsql / ext-pdo_sqlite. spc
+# treats the hook and the real ext as MUTUALLY EXCLUSIVE and hard-fails the build
+# if both are present (swoole_hook_pgsql.php / swoole_hook_sqlite.php throw
+# WrongUsageException; see docs/en/guide/extension-notes.md in the pinned ref).
+# Do NOT re-add the pgsql/sqlite hooks — §5.5 of verify-artifact.sh asserts the
+# real modules load and will fail the build if they come back.
+# swoole-hook-mysql is different: it hooks mysqlnd + pdo_mysql and COEXISTS with
+# them (spc lists pdo_mysql as one of its ext-depends; no conflict), so it stays.
+EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,event,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,opentelemetry,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,swoole,swoole-hook-mysql,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
 
 # --- static-php-cli pinning (§3, §9) ------------------------------------------
 # PIN the ref and re-verify the curl.php c-ares patch on every bump

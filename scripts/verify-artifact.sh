@@ -105,4 +105,63 @@ else
 fi
 [ -n "$tmp" ] && rm -rf "$tmp"
 
+echo "== §5.5 real PDO extensions (pdo_pgsql / pdo_sqlite, NOT swoole hooks) =="
+# Regression gate for the swoole-hook-{pgsql,sqlite} -> real-ext cutover.
+# Swoole's vendored forks register a 'pgsql'/'sqlite' PDO *driver* without ever
+# registering the pdo_pgsql/pdo_sqlite *module*, so a broken build has
+# getAvailableDrivers() listing the driver while extension_loaded() is false and
+# php -m omits it — which the §5.2 grep would happily pass. Assert the module
+# registry and the PDO driver hash AGREE, and that a real handle constructs.
+pdo="$("$PHP" -r '
+  $fail = [];
+  foreach (["pdo_pgsql", "pdo_sqlite", "swoole"] as $m) {
+    if (!extension_loaded($m)) $fail[] = "extension_loaded($m) !== true";
+  }
+  $drivers = PDO::getAvailableDrivers();
+  foreach (["mysql", "pgsql", "sqlite"] as $d) {
+    if (!in_array($d, $drivers, true)) $fail[] = "driver \"$d\" missing from getAvailableDrivers()";
+  }
+  try {
+    $db  = new PDO("sqlite::memory:");
+    $one = $db->query("SELECT 1")->fetchColumn();
+    if ((string) $one !== "1") $fail[] = "SELECT 1 returned " . var_export($one, true);
+  } catch (\Throwable $e) {
+    $fail[] = "new PDO(sqlite::memory:) threw: " . $e->getMessage();
+  }
+  echo $fail ? ("FAIL: " . implode("; ", $fail)) : "ok";
+' 2>/dev/null || true)"
+echo "  pdo module/driver agreement => $pdo"
+[ "$pdo" = "ok" ] || fail "real PDO ext gate: $pdo — swoole pgsql/sqlite hooks back in EXTENSIONS, or pdo_pgsql/pdo_sqlite dropped?"
+
+# The real modules MUST appear in php -m (the swoole hooks never did). $mods is
+# captured in §5.2.
+for m in pdo_pgsql pdo_sqlite; do
+  grep -iqx "$m" <<<"$mods" || fail "module '$m' missing from php -m (real ext not registered)"
+done
+
+# The FPM binary is built from the same EXTENSIONS set; assert it agrees so the
+# CLI and FPM builds can't silently diverge. php-fpm -m lists compiled modules.
+fpmmods="$("$FPM" -m 2>/dev/null || true)"
+for m in pdo_pgsql pdo_sqlite swoole; do
+  grep -iqx "$m" <<<"$fpmmods" || fail "module '$m' missing from php-fpm -m"
+done
+echo "  pdo_pgsql / pdo_sqlite present in both php -m and php-fpm -m."
+
+# Driver-specific PDO subclasses (Pdo\Pgsql, Pdo\Sqlite) landed in 8.4 via the
+# "PDO driver specific subclasses" RFC. They do NOT exist on 8.2/8.3, so assert
+# only for minors >= 8.4. `min(8.4, MINOR) == 8.4` <=> MINOR >= 8.4.
+if [ "$(printf '8.4\n%s\n' "$MINOR" | sort -V | head -1)" = "8.4" ]; then
+  sub="$("$PHP" -r '
+    $fail = [];
+    foreach (["Pdo\\Pgsql", "Pdo\\Sqlite"] as $c) {
+      if (!class_exists($c)) $fail[] = "$c does not exist";
+    }
+    echo $fail ? ("FAIL: " . implode("; ", $fail)) : "ok";
+  ' 2>/dev/null || true)"
+  echo "  minor $MINOR >= 8.4, Pdo\\Pgsql / Pdo\\Sqlite subclasses => $sub"
+  [ "$sub" = "ok" ] || fail "8.4+ PDO driver subclasses: $sub"
+else
+  echo "  minor $MINOR < 8.4 — skipping Pdo\\Pgsql / Pdo\\Sqlite subclass check (not present pre-8.4)."
+fi
+
 echo "VERIFY OK: $MINOR $OS-$ARCH"
