@@ -12,20 +12,40 @@ wins.
 
 ## What runs
 
-One workflow, [`.github/workflows/release.yml`](.github/workflows/release.yml),
-triggered daily (schedule) or manually (`workflow_dispatch`). It has three jobs,
-serialized against other releases by a single `concurrency` group so revisions
-can't collide (§9):
+[`.github/workflows/release.yml`](.github/workflows/release.yml) is triggered
+daily (schedule) or manually (`workflow_dispatch`). It is a thin driver that
+calls the reusable
+[`.github/workflows/release-channel.yml`](.github/workflows/release-channel.yml)
+**once per channel** (see [Channels](#channels)), serialized against other
+releases by a single `concurrency` group so revisions can't collide (§9). Each
+channel run has three jobs:
 
-1. **resolve** — fetch the previously-published `php.json`, resolve the latest
-   upstream patch per supported minor, and compute the build matrix + each
-   build's `revision` from the *previous manifest* (§7 increment algorithm).
+1. **resolve** — fetch the channel's previously-published manifest, resolve the
+   latest upstream patch per minor, and compute the build matrix + each build's
+   `revision` from the *previous manifest* (§7 increment algorithm).
 2. **build** (matrix, native runner per target) — build with static-php-cli,
    apply the c-ares patch, run the §5 gate, package the two single-member
    tarballs. macOS binaries are ad-hoc signed.
-3. **publish** — regenerate `php.json`, minisign-sign it (prehashed), upload
+3. **publish** — regenerate the manifest, minisign-sign it (prehashed), upload
    assets → manifest → signature, then **prune last**; finish with a signed
    round-trip sanity check.
+
+## Channels
+
+Two channels publish into the **same** rolling release (tag `php`), each with
+its own signed manifest, so `yerdd` can offer (or hide) the EOL tier
+independently:
+
+| Channel | Minors | Manifest | Extensions | ext partner |
+|---|---|---|---|---|
+| `stable` | 8.2 – 8.5 | `php.json` | full set | yerd-dump / pcov |
+| `legacy` | 7.4 / 8.0 / 8.1 | `php-legacy.json` | trimmed (no `opentelemetry`, no `swoole`) | none (EOL) |
+
+The channel is a single switch in `scripts/config.sh` (`CHANNEL=stable|legacy`)
+that swaps the minors, extension set, and manifest name; every other script is
+channel-agnostic. `publish.sh` prunes against the **union** of both manifests so
+one channel never deletes the other's tarballs. The `legacy` extension set is
+provisional until the first CI build confirms what spc accepts on EOL PHP.
 
 ## Scripts (each maps to a brief section)
 
@@ -69,15 +89,21 @@ The rolling release (tag `php`) is created automatically on the first publish.
 - **Rebuild an unchanged patch** (c-ares cutover, spc-ref bump, security) →
   `workflow_dispatch` with `force: true` (optionally `only_minor: 8.4`). This
   bumps the `-N` revision so existing installs actually receive it (auto-heal, §7).
+- **Target one channel** → `workflow_dispatch` with `channel: legacy` (or
+  `stable`). Default `both` (scheduled runs always do both). `only_minor` applies
+  within the chosen channel(s), e.g. `channel: legacy`, `only_minor: 8.1`.
 - **Bump static-php-cli** → change `SPC_REF` in `config.sh` and **re-verify the
   §3 curl.php patch still matches** (it's under upstream refactor). The build
   fails loudly if the patch no-ops.
 
 ## Local checks
 
-The pure-logic pieces run without a build:
+The pure-logic pieces run without a build (set `CHANNEL` to pick the channel's
+knobs; defaults to `stable`):
 ```bash
 bash scripts/targets-json.sh
+CHANNEL=stable bash -c 'source scripts/config.sh; echo "$SUPPORTED_MINORS -> $MANIFEST_NAME"'
+CHANNEL=legacy bash -c 'source scripts/config.sh; echo "$SUPPORTED_MINORS -> $MANIFEST_NAME"'
 php  scripts/resolve-builds.php --latest=latest.json --targets=targets.json --minors="8.2 8.3 8.4 8.5"
-php  scripts/generate-manifest.php --built=matrix.json --assets-dir=dist --minors="8.2 8.3 8.4 8.5"
+php  scripts/generate-manifest.php --built=matrix.json --assets-dir=dist --minors="7.4 8.0 8.1"
 ```

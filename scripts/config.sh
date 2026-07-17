@@ -4,10 +4,25 @@
 #
 # Authoritative brief: yerd-php-AGENTS.md. If this disagrees with it, the brief wins.
 
-# --- Supported PHP minors (§2) -------------------------------------------------
-# Every minor >= 8.2 that upstream still supports. 8.2 is yerd's floor.
-# Add a minor when it GAs; drop it when it EOLs below the floor.
-SUPPORTED_MINORS="8.2 8.3 8.4 8.5"
+# --- Channel: stable vs legacy ------------------------------------------------
+# yerd-php publishes TWO channels into the SAME rolling release (§6):
+#   stable  — supported minors (>= 8.2), full extension set        -> php.json
+#   legacy  — EOL minors (7.4/8.0/8.1) offered as an opt-in, hideable UI tier,
+#             with a trimmed extension set and NO yerd-php-ext (pcov / yerd-dump
+#             aren't built for EOL PHP)                             -> php-legacy.json
+# CHANNEL selects which one this invocation operates on. Every channel-varying
+# knob (minors, extension set, manifest name) is swapped in the case block near
+# the bottom of this file, so all the downstream scripts stay channel-agnostic —
+# they just read SUPPORTED_MINORS / EXTENSIONS / MANIFEST_NAME.
+CHANNEL="${CHANNEL:-stable}"
+
+# --- Supported PHP minors, per channel (§2) -----------------------------------
+# stable: every minor >= 8.2 that upstream still supports. 8.2 is yerd's floor.
+#   Add a minor when it GAs; drop it when it EOLs below the floor.
+STABLE_MINORS="8.2 8.3 8.4 8.5"
+# legacy: EOL minors we still offer as a hideable tier. spc 2.8.5 can still build
+# these; drop one when spc drops support for it.
+LEGACY_MINORS="7.4 8.0 8.1"
 
 # --- Extension set — the "bulk" set (§1) --------------------------------------
 # Keep in sync with what yerd expects. Passed to spc as a single comma string.
@@ -26,7 +41,21 @@ SUPPORTED_MINORS="8.2 8.3 8.4 8.5"
 # real modules load and will fail the build if they come back.
 # swoole-hook-mysql is different: it hooks mysqlnd + pdo_mysql and COEXISTS with
 # them (spc lists pdo_mysql as one of its ext-depends; no conflict), so it stays.
-EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,event,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,opentelemetry,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,swoole,swoole-hook-mysql,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
+STABLE_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,event,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,opentelemetry,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,swoole,swoole-hook-mysql,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
+
+# --- Extension set — legacy (EOL minors) --------------------------------------
+# STABLE_EXTENSIONS minus the extensions that don't build uniformly across
+# 7.4/8.0/8.1 with the pinned spc:
+#   - opentelemetry     : the ext requires PHP 8.0+ (hard-fails on 7.4).
+#   - swoole            : spc's pinned swoole needs a newer PHP than 7.4 and
+#                         fragments across the legacy minors; dropped so the
+#                         legacy set is ONE uniform list (§ verify gate skips the
+#                         swoole assertions automatically when it's absent).
+#   - swoole-hook-mysql : depends on swoole.
+# Everything else (incl. the real pdo_pgsql / pdo_sqlite modules the §5.5 gate
+# asserts) is kept. PROVISIONAL: the exact set can only be confirmed by the first
+# CI build — if spc rejects another ext on an EOL minor, trim it here.
+LEGACY_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,event,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
 
 # --- static-php-cli pinning (§3, §9) ------------------------------------------
 # PIN the ref and re-verify the curl.php c-ares patch on every bump
@@ -42,16 +71,42 @@ SPC_REF="2.8.5"
 # forjedio/yerd-php-ext publishes yerd-dump.so / pcov.so that get dlopen'ed into
 # these binaries. The §5 gate downloads the matching .so and really loads it.
 EXT_REPO="forjedio/yerd-php-ext"
-# Fallback only (brand-new minor with no published ext yet): ZEND_MODULE_API_NO
-# that yerd-php-ext pins per minor. These are PHP's published ABI numbers; the
-# authoritative source is yerd-php-ext's build config — verify there, don't trust
-# these blindly. Format: "<minor>:<api_no>".
-ZEND_API_NOS="8.2:20220829 8.3:20230831 8.4:20240924 8.5:20250925"
+# Fallback ZEND_MODULE_API_NO per minor — used when no real yerd-php-ext .so
+# exists to load (a brand-new stable minor, OR every legacy minor, which ships no
+# ext at all). These are PHP's published ABI numbers ("PHP API => NNNNNNNN"); for
+# stable minors the authoritative source is yerd-php-ext's build config — verify
+# there, don't trust these blindly. The legacy (7.4/8.0/8.1) numbers are PHP's own
+# published values (no ext partner to reconcile with). Format: "<minor>:<api_no>".
+ZEND_API_NOS="7.4:20190902 8.0:20200930 8.1:20210902 8.2:20220829 8.3:20230831 8.4:20240924 8.5:20250925"
 
 # --- Release model (§6) --------------------------------------------------------
 RELEASE_TAG="php"                     # single rolling release; create once, never delete
-MANIFEST_NAME="php.json"
-MANIFEST_SIG_NAME="php.json.minisig"
+
+# Both channels live in the ONE rolling release above. This registry maps each
+# channel -> its manifest filename. publish.sh unions every channel's referenced
+# assets so publishing one channel never prunes another's tarballs (§6). Keep in
+# sync with the per-channel case block below. Format: "<channel>:<manifest>".
+CHANNELS="stable:php.json legacy:php-legacy.json"
+# All manifest basenames across channels (space separated). Sig = "<name>.minisig".
+all_manifest_names() { for c in $CHANNELS; do echo "${c#*:}"; done; }
+
+# --- Per-channel knobs (swapped by $CHANNEL) ----------------------------------
+# Downstream scripts read SUPPORTED_MINORS / EXTENSIONS / MANIFEST_NAME only, so
+# this single switch is the whole of the channel abstraction.
+case "$CHANNEL" in
+  stable)
+    SUPPORTED_MINORS="$STABLE_MINORS"
+    EXTENSIONS="$STABLE_EXTENSIONS"
+    MANIFEST_NAME="php.json"
+    ;;
+  legacy)
+    SUPPORTED_MINORS="$LEGACY_MINORS"
+    EXTENSIONS="$LEGACY_EXTENSIONS"
+    MANIFEST_NAME="php-legacy.json"
+    ;;
+  *) echo "FATAL: unknown CHANNEL '$CHANNEL' (want: stable|legacy)" >&2; exit 1 ;;
+esac
+MANIFEST_SIG_NAME="$MANIFEST_NAME.minisig"
 
 # --- Targets (§1) --------------------------------------------------------------
 # token | runner | spc wrapper. Runner labels copied from static-php-cli-hosted.

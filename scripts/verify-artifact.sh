@@ -15,6 +15,11 @@ PHP="${1:?php-bin}"; FPM="${2:?php-fpm-bin}"; MINOR="${3:?minor}"; OS="${4:?os}"
 
 fail() { echo "VERIFY FAIL: $*" >&2; exit 1; }
 
+# True if $1 is a member of the active channel's comma-separated EXTENSIONS set.
+# Assertions for optional-per-channel extensions (e.g. swoole, which the legacy
+# channel drops) are gated on this so the gate matches what was actually built.
+has_ext() { case ",$EXTENSIONS," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
+
 echo "== §5.1 #59 regression gate (no c-ares) =="
 # CURLOPT_DNS_SERVERS is a c-ares-only option: curl_setopt returns false
 # (CURLE_NOT_BUILT_IN) iff libcurl lacks c-ares. true => c-ares present => FAIL.
@@ -38,7 +43,9 @@ echo "== §5.2 php -v / php -m (bulk set present) =="
 mods="$("$PHP" -m)"
 # Name mapping is not 1:1 with ext tokens, so we assert a critical, cleanly-named
 # subset — including the four the brief calls out explicitly (swoole,intl,opcache,curl).
+# Skip any that the active channel doesn't build (legacy drops swoole).
 for m in curl swoole intl mbstring openssl sodium gd pdo_mysql pgsql redis zip; do
+  has_ext "$m" || continue
   grep -iqx "$m" <<<"$mods" || fail "module '$m' missing from php -m"
 done
 # opcache is listed as "Zend OPcache", not "opcache".
@@ -112,9 +119,12 @@ echo "== §5.5 real PDO extensions (pdo_pgsql / pdo_sqlite, NOT swoole hooks) ==
 # getAvailableDrivers() listing the driver while extension_loaded() is false and
 # php -m omits it — which the §5.2 grep would happily pass. Assert the module
 # registry and the PDO driver hash AGREE, and that a real handle constructs.
-pdo="$("$PHP" -r '
+# swoole is only asserted when the channel actually built it (legacy drops it).
+req_mods="pdo_pgsql pdo_sqlite"
+has_ext swoole && req_mods="$req_mods swoole"
+pdo="$(REQ_MODS="$req_mods" "$PHP" -r '
   $fail = [];
-  foreach (["pdo_pgsql", "pdo_sqlite", "swoole"] as $m) {
+  foreach (array_filter(explode(" ", getenv("REQ_MODS"))) as $m) {
     if (!extension_loaded($m)) $fail[] = "extension_loaded($m) !== true";
   }
   $drivers = PDO::getAvailableDrivers();
@@ -142,9 +152,10 @@ done
 # The FPM binary is built from the same EXTENSIONS set; assert it agrees so the
 # CLI and FPM builds can't silently diverge. php-fpm -m lists compiled modules.
 fpmmods="$("$FPM" -m 2>/dev/null || true)"
-for m in pdo_pgsql pdo_sqlite swoole; do
+for m in pdo_pgsql pdo_sqlite; do
   grep -iqx "$m" <<<"$fpmmods" || fail "module '$m' missing from php-fpm -m"
 done
+has_ext swoole && { grep -iqx "swoole" <<<"$fpmmods" || fail "module 'swoole' missing from php-fpm -m"; }
 echo "  pdo_pgsql / pdo_sqlite present in both php -m and php-fpm -m."
 
 # Driver-specific PDO subclasses (Pdo\Pgsql, Pdo\Sqlite) landed in 8.4 via the

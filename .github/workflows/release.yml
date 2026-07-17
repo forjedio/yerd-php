@@ -1,14 +1,26 @@
 name: build-and-release
 
 # §9 cadence: scheduled (build newer upstream patches) + manual dispatch
-# (rebuild a minor / all — set force to bump the revision of an unchanged patch).
+# (rebuild a minor / channel — set force to bump the revision of an unchanged
+# patch). The actual pipeline lives in the reusable release-channel.yml; this
+# workflow just owns the triggers and drives it once per channel.
+#
+# Both channels publish into the SAME rolling release (tag `php`), so the legacy
+# leg `needs` the stable leg — that serializes the shared-release prune step
+# within a run, and the top-level concurrency group serializes across runs (§6).
 on:
   schedule:
     - cron: "17 6 * * *"          # daily; offset from the top of the hour
   workflow_dispatch:
     inputs:
+      channel:
+        description: "Which channel(s) to run."
+        required: false
+        type: choice
+        options: [both, stable, legacy]
+        default: both
       only_minor:
-        description: "Restrict to a single minor (e.g. 8.4). Blank = all supported."
+        description: "Restrict to a single minor (e.g. 8.4, or 8.1 for legacy). Blank = all in the channel(s)."
         required: false
         type: string
       force:
@@ -17,6 +29,13 @@ on:
         type: boolean
         default: false
 
+# A reusable workflow's GITHUB_TOKEN permissions are CAPPED by the caller's, so
+# the write grant must live here too — release-channel.yml also declares it, but
+# a callee can only restrict, never elevate. Without this the callee's
+# gh release upload/delete-asset would 403 if the repo default token is read-only.
+permissions:
+  contents: write               # create/update the rolling release + assets
+
 # §9 — serialize releases so a scheduled run and a manual dispatch can't both
 # run the 'read previous manifest -> +1' increment and collide on a revision /
 # asset name. Never cancel an in-flight release.
@@ -24,171 +43,26 @@ concurrency:
   group: yerd-php-release
   cancel-in-progress: false
 
-permissions:
-  contents: write               # create/update the rolling release + assets
-
 jobs:
-  # ---------------------------------------------------------------------------
-  resolve:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.resolve.outputs.matrix }}
-      count: ${{ steps.resolve.outputs.count }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up PHP (tooling)
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.4"
-      - name: Pre-flight — signing key present (fail fast, before any build)
-        env:
-          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
-          MINISIGN_PUBLIC_KEY: ${{ vars.MINISIGN_PUBLIC_KEY }}
-        run: |
-          # Validate the signing config up front so a missing secret fails in
-          # seconds instead of after hours of paid macOS/Linux build time.
-          [ -n "$MINISIGN_SECRET_KEY" ] || { echo "FATAL: secret MINISIGN_SECRET_KEY is not set — run scripts/keygen.sh and configure it."; exit 1; }
-          [ -n "$MINISIGN_PUBLIC_KEY" ] || { echo "FATAL: variable MINISIGN_PUBLIC_KEY is not set — the sign self-verify and §10.8 sanity-check require it."; exit 1; }
-          echo "signing config present."
-      - name: Fetch previously-published manifest (§10.1)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          source scripts/config.sh
-          # Distinguish "genuine first run" (no rolling release yet) from a
-          # transient fetch failure. Defaulting a fetch error to '{}' would make
-          # resolve treat every target as new and RESET every revision to 1,
-          # wiping the auto-heal history (§7) for all installs. So: only an
-          # absent release is "empty"; anything else is fatal.
-          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "No rolling '$RELEASE_TAG' release yet — first run, empty manifest."
-            echo '{}' > old-manifest.json
-          else
-            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-              --pattern "$MANIFEST_NAME" --output old-manifest.json --clobber \
-              || { echo "FATAL: release exists but $MANIFEST_NAME could not be downloaded — aborting (a default-empty here would reset all revisions)."; exit 1; }
-            n="$(jq -r '(.builds // []) | length' old-manifest.json 2>/dev/null || echo x)"
-            case "$n" in
-              ''|x|0) echo "FATAL: fetched $MANIFEST_NAME is invalid or has no builds[] — refusing (would reset revisions)."; exit 1 ;;
-              *) echo "Previous manifest OK ($n builds)." ;;
-            esac
-          fi
-      - name: Resolve build matrix (§7 revision algorithm)
-        id: resolve
-        run: |
-          source scripts/config.sh
-          bash scripts/latest-patches.sh > latest.json
-          bash scripts/targets-json.sh   > targets.json
-          only="${{ inputs.only_minor }}"
-          force=""; [ "${{ inputs.force }}" = "true" ] && force="--force"
-          onlyarg=""; [ -n "$only" ] && onlyarg="--only-minor=$only"
-          php scripts/resolve-builds.php \
-            --old-manifest=old-manifest.json \
-            --latest=latest.json --targets=targets.json \
-            --minors="$SUPPORTED_MINORS" $onlyarg $force > matrix.json
-          echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
-          echo "count=$(jq '.include | length' matrix.json)" >> "$GITHUB_OUTPUT"
-      - name: Upload resolve artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: resolve
-          path: |
-            matrix.json
-            old-manifest.json
-            latest.json
+  stable:
+    # Scheduled runs always do both channels; dispatch honours the choice.
+    if: ${{ github.event_name == 'schedule' || inputs.channel == 'both' || inputs.channel == 'stable' }}
+    uses: ./.github/workflows/release-channel.yml
+    with:
+      channel: stable
+      only_minor: ${{ inputs.only_minor || '' }}
+      force: ${{ inputs.force || false }}
+    secrets: inherit
 
-  # ---------------------------------------------------------------------------
-  build:
-    needs: resolve
-    if: needs.resolve.outputs.count > 0
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false          # one target failing must not abandon the rest
-      matrix: ${{ fromJson(needs.resolve.outputs.matrix) }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up PHP (tooling on host)
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.4"
-      - name: Build ${{ matrix.name }} (§4)
-        env:
-          # spc's --prefer-pre-built fetches dependency packages from the
-          # static-php-cli-hosted releases via api.github.com; unauthenticated
-          # CI shares IPs and hits the 60-req/hr limit (HTTP 403). spc reads
-          # GITHUB_TOKEN (CurlHook::setupGithubToken) to authenticate.
-          GITHUB_TOKEN: ${{ github.token }}
-        run: bash scripts/build-target.sh "${{ matrix.minor }}" "${{ matrix.os }}"
-      - name: Verify §5 gate
-        env:
-          GH_TOKEN: ${{ github.token }}     # for the cross-repo real-ext download
-        run: |
-          bash scripts/verify-artifact.sh \
-            static-php-cli/buildroot/bin/php \
-            static-php-cli/buildroot/bin/php-fpm \
-            "${{ matrix.minor }}" "${{ matrix.os }}" "${{ matrix.arch }}"
-      - name: Package the two single-member tarballs (§1)
-        run: |
-          mkdir -p dist
-          bash scripts/package-artifacts.sh \
-            "${{ matrix.php }}" "${{ matrix.revision }}" \
-            "${{ matrix.os }}" "${{ matrix.arch }}" \
-            static-php-cli/buildroot/bin dist
-      - name: Upload target artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-${{ matrix.name }}
-          path: dist/*.tar.gz
-          if-no-files-found: error
-
-  # ---------------------------------------------------------------------------
-  publish:
-    needs: [resolve, build]
-    if: needs.resolve.outputs.count > 0 && needs.build.result == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up PHP (tooling)
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.4"
-      - name: Install minisign
-        run: sudo apt-get update && sudo apt-get install -y minisign
-      - name: Download resolve outputs
-        uses: actions/download-artifact@v4
-        with:
-          name: resolve
-          path: .
-      - name: Download all built tarballs into dist/
-        uses: actions/download-artifact@v4
-        with:
-          pattern: dist-*
-          path: dist
-          merge-multiple: true
-      - name: Generate php.json (§7)
-        run: |
-          source scripts/config.sh
-          php scripts/generate-manifest.php \
-            --built=matrix.json --assets-dir=dist \
-            --minors="$SUPPORTED_MINORS" \
-            --old-manifest=old-manifest.json > "$MANIFEST_NAME"
-          echo "::group::php.json"; cat "$MANIFEST_NAME"; echo "::endgroup::"
-      - name: Sign php.json (§6 — prehashed, dedicated key)
-        env:
-          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
-          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
-          MINISIGN_PUBLIC_KEY: ${{ vars.MINISIGN_PUBLIC_KEY }}
-        run: |
-          source scripts/config.sh
-          bash scripts/sign-manifest.sh "$MANIFEST_NAME" "$MANIFEST_SIG_NAME"
-      - name: Publish — prune LAST (§6)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          source scripts/config.sh
-          bash scripts/publish.sh dist "$MANIFEST_NAME" "$MANIFEST_SIG_NAME"
-      - name: Post-publish sanity (§10.8)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          MINISIGN_PUBLIC_KEY: ${{ vars.MINISIGN_PUBLIC_KEY }}
-        run: bash scripts/sanity-check.sh
+  legacy:
+    # `needs: stable` + `always()` sequences legacy AFTER stable when both run
+    # (shared-release prune must not race), yet still runs legacy when stable is
+    # skipped (dispatch with channel=legacy).
+    needs: [stable]
+    if: ${{ always() && (github.event_name == 'schedule' || inputs.channel == 'both' || inputs.channel == 'legacy') }}
+    uses: ./.github/workflows/release-channel.yml
+    with:
+      channel: legacy
+      only_minor: ${{ inputs.only_minor || '' }}
+      force: ${{ inputs.force || false }}
+    secrets: inherit
