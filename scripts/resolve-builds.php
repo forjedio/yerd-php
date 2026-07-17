@@ -15,7 +15,11 @@
  *
  * Usage:
  *   php resolve-builds.php --latest=latest.json --targets=targets.json \
- *       --minors="8.2 8.3 8.4 8.5" [--old-manifest=old.json] [--only-minor=8.4] [--force]
+ *       --minors="8.2 8.3 8.4 8.5" [--old-manifest=old.json] [--only-minor=8.4] \
+ *       [--only-target=macos-aarch64] [--force]
+ *
+ * --only-target restricts to a single "<os>-<arch>" (e.g. for iterating on a
+ * single failing target); it must match one of the targets in --targets.
  */
 
 declare(strict_types=1);
@@ -50,9 +54,17 @@ foreach (['latest', 'targets', 'minors'] as $req) {
 
 $latest    = read_json_file($args['latest'], 'latest-patches');   // {"8.4":"8.4.12", ...}
 $targets   = read_json_file($args['targets'], 'targets');         // [{os,arch,runner,spc}, ...]
-$minors    = preg_split('/\s+/', trim((string) $args['minors']), -1, PREG_SPLIT_NO_EMPTY);
-$onlyMinor = $args['only-minor'] ?? null;
-$force     = isset($args['force']);
+$minors     = preg_split('/\s+/', trim((string) $args['minors']), -1, PREG_SPLIT_NO_EMPTY);
+$onlyMinor  = $args['only-minor'] ?? null;
+$onlyTarget = $args['only-target'] ?? null;   // "<os>-<arch>", e.g. macos-aarch64
+$force      = isset($args['force']);
+
+// Fail loud on a typo'd --only-target rather than silently building nothing.
+if ($onlyTarget !== null) {
+    $known = array_map(fn($t) => "{$t['os']}-{$t['arch']}", $targets);
+    if (!in_array($onlyTarget, $known, true))
+        fail("--only-target '$onlyTarget' matches no target (known: " . implode(', ', $known) . ")");
+}
 
 // Previous manifest is optional (first run has none). Build an index keyed by
 // "minor|os|arch" for O(1) lookup of the current (php, revision).
@@ -76,6 +88,7 @@ foreach ($minors as $minor) {
     if (!str_starts_with($php, "$minor.")) fail("latest '$php' is not within minor '$minor'");
 
     foreach ($targets as $t) {
+        if ($onlyTarget !== null && "{$t['os']}-{$t['arch']}" !== $onlyTarget) continue;
         $key  = "$minor|{$t['os']}|{$t['arch']}";
         $prev = $oldIndex[$key] ?? null;
 
@@ -122,7 +135,8 @@ foreach ($minors as $minor) {
 }
 
 fwrite(STDERR, "resolve-builds: " . count($include) . " target(s) to build" .
-    ($force ? " [force]" : "") . ($onlyMinor ? " [only $onlyMinor]" : "") . "\n");
+    ($force ? " [force]" : "") . ($onlyMinor ? " [only-minor $onlyMinor]" : "") .
+    ($onlyTarget ? " [only-target $onlyTarget]" : "") . "\n");
 fwrite(STDERR, implode("\n", $summary) . "\n");
 
 echo json_encode(['include' => $include], JSON_UNESCAPED_SLASHES) . "\n";

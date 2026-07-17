@@ -23,6 +23,10 @@ on:
         description: "Restrict to a single minor (e.g. 8.4, or 8.1 for legacy). Blank = all in the channel(s)."
         required: false
         type: string
+      only_target:
+        description: "Restrict to one target '<os>-<arch>' (e.g. macos-aarch64). Blank = all four targets."
+        required: false
+        type: string
       force:
         description: "Rebuild even if the patch is unchanged (bumps revision -N). Use for c-ares cutover / spc bump / security rebuild."
         required: false
@@ -51,6 +55,7 @@ jobs:
     with:
       channel: stable
       only_minor: ${{ inputs.only_minor || '' }}
+      only_target: ${{ inputs.only_target || '' }}
       force: ${{ inputs.force || false }}
     secrets: inherit
 
@@ -64,5 +69,6 @@ jobs:
     with:
       channel: legacy
       only_minor: ${{ inputs.only_minor || '' }}
+      only_target: ${{ inputs.only_target || '' }}
       force: ${{ inputs.force || false }}
     secrets: inherit

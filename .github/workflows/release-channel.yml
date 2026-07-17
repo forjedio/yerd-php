@@ -16,6 +16,11 @@ on:
         required: false
         type: string
         default: ""
+      only_target:
+        description: "Restrict to one '<os>-<arch>' (e.g. macos-aarch64). Blank = all targets."
+        required: false
+        type: string
+        default: ""
       force:
         description: "Rebuild even if the patch is unchanged (bumps revision -N)."
         required: false
@@ -89,12 +94,14 @@ jobs:
           bash scripts/latest-patches.sh > latest.json
           bash scripts/targets-json.sh   > targets.json
           only="${{ inputs.only_minor }}"
+          target="${{ inputs.only_target }}"
           force=""; [ "${{ inputs.force }}" = "true" ] && force="--force"
           onlyarg=""; [ -n "$only" ] && onlyarg="--only-minor=$only"
+          targetarg=""; [ -n "$target" ] && targetarg="--only-target=$target"
           php scripts/resolve-builds.php \
             --old-manifest=old-manifest.json \
             --latest=latest.json --targets=targets.json \
-            --minors="$SUPPORTED_MINORS" $onlyarg $force > matrix.json
+            --minors="$SUPPORTED_MINORS" $onlyarg $targetarg $force > matrix.json
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
           echo "count=$(jq '.include | length' matrix.json)" >> "$GITHUB_OUTPUT"
       - name: Upload resolve artifacts
@@ -145,6 +152,17 @@ jobs:
             "${{ matrix.php }}" "${{ matrix.revision }}" \
             "${{ matrix.os }}" "${{ matrix.arch }}" \
             static-php-cli/buildroot/bin dist
+      # spc writes the real compiler/linker error to log/ (NOT the console — the
+      # console only shows the failed command + exit code). Capture it on failure
+      # so an extension that won't compile on an EOL PHP can actually be pinned
+      # down and trimmed from LEGACY_EXTENSIONS.
+      - name: Upload static-php-cli logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spc-logs-${{ inputs.channel }}-${{ matrix.name }}
+          path: static-php-cli/log/
+          if-no-files-found: warn
       - name: Upload target artifacts
         uses: actions/upload-artifact@v4
         with:
