@@ -44,8 +44,14 @@ independently:
 The channel is a single switch in `scripts/config.sh` (`CHANNEL=stable|legacy`)
 that swaps the minors, extension set, and manifest name; every other script is
 channel-agnostic. `publish.sh` prunes against the **union** of both manifests so
-one channel never deletes the other's tarballs. The `legacy` extension set is
-provisional until the first CI build confirms what spc accepts on EOL PHP.
+one channel never deletes the other's tarballs.
+
+Legacy also runs one extra build step: `apply-legacy-cflags-patch.sh` forces
+`-std=gnu17` for the php-src compile, because EOL minors bundle old K&R-style
+`libbcmath` that the compiler's new C23 default rejects (stable pins its own std
+and is unaffected). The `legacy` extension set otherwise stays provisional until
+the first CI build confirms what spc accepts on EOL PHP — the authoritative list
+is `php -m` on a shipped binary, not the requested set.
 
 ## Scripts (each maps to a brief section)
 
@@ -57,6 +63,7 @@ provisional until the first CI build confirms what spc accepts on EOL PHP.
 | `scripts/resolve-builds.php` | §7 | Decide what to build + each `revision` (reads previous manifest) |
 | `scripts/build-target.sh` | §4 | Clone pinned spc → patch → download → build → sign |
 | `scripts/apply-curl-patch.sh` | §3 | Force `ENABLE_ARES=OFF`; **fail if it no-ops** |
+| `scripts/apply-legacy-cflags-patch.sh` | legacy | Force `-std=gnu17` for EOL php-src (K&R libbcmath vs C23); **fail if it no-ops** |
 | `scripts/sign-macos.sh` | §4 | Ad-hoc sign both macOS binaries (mandatory on arm64) |
 | `scripts/verify-artifact.sh` | §5 | No-c-ares gate, `-m`/`-fpm -t`, real cross-repo ext load |
 | `scripts/package-artifacts.sh` | §1 | The two single-member `.tar.gz` with exact names |

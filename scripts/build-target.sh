@@ -39,6 +39,14 @@ cd "$SPC_DIR"
 # this.) Canonical setup step — must run before any bin/spc invocation.
 composer install --no-dev --no-interaction --optimize-autoloader
 
+# LEGACY ONLY — force -std=gnu17 for the php-src compile BEFORE any spc command
+# reads config/env.ini. EOL minors (7.4/8.0/8.1) bundle K&R-style libbcmath that
+# won't compile under the compiler's new C23 default; stable is unaffected and
+# left untouched. Patches env.ini in the fresh checkout; fails loud if it no-ops.
+if [ "${CHANNEL:-stable}" = "legacy" ]; then
+  bash "$here/apply-legacy-cflags-patch.sh" "$SPC_DIR"
+fi
+
 # --- Build pipeline (§4) ------------------------------------------------------
 "$CMD" doctor --auto-fix
 "$CMD" download --with-php="$MINOR" --for-extensions="$EXTENSIONS" --prefer-pre-built --retry=5
