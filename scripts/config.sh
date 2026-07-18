@@ -56,12 +56,13 @@ STABLE_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,event,exif,filein
 # asserts) is kept. PROVISIONAL: the exact set can only be confirmed by the first
 # CI build — if spc rejects another ext on an EOL minor, trim it here.
 #
-# opcache is a SPECIAL case and stays in this list: spc can only build it as a
-# static ext for PHP >= 8.0 ("Statically compiled PHP with Zend Opcache only
-# available for PHP >= 8.0" — hard-fails on 7.4), but 8.0/8.1 build it fine.
-# Dropping it channel-wide would needlessly regress 8.0/8.1, so instead it is
-# stripped PER MINOR for 7.4 only — see extensions_for_minor() below, which every
-# build/verify step MUST go through rather than reading $EXTENSIONS directly.
+# opcache and protobuf are SPECIAL cases and stay in this list: spc hard-fails
+# BOTH on 7.4 because each needs PHP >= 8.0 ("Statically compiled PHP with Zend
+# Opcache only available for PHP >= 8.0"; "The latest protobuf extension requires
+# PHP 8.0 or later"), but 8.0/8.1 build them fine. Dropping them channel-wide
+# would needlessly regress 8.0/8.1, so instead they are stripped PER MINOR for 7.4
+# only — see extensions_for_minor() below, which every build/verify step MUST go
+# through rather than reading $EXTENSIONS directly.
 LEGACY_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,event,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
 
 # --- static-php-cli pinning (§3, §9) ------------------------------------------
@@ -121,13 +122,21 @@ MANIFEST_SIG_NAME="$MANIFEST_NAME.minisig"
 # dropping the member channel-wide — avoids regressing the minors that DO support
 # it. Downstream (build-target.sh, verify-artifact.sh) MUST build/verify against
 # extensions_for_minor "$MINOR", never $EXTENSIONS directly.
-#   - opcache on 7.4: spc hard-fails "Statically compiled PHP with Zend Opcache
-#     only available for PHP >= 8.0". 8.0/8.1 build it fine, so strip for 7.4 only.
+#   - opcache on 7.4:  spc hard-fails "Statically compiled PHP with Zend Opcache
+#                      only available for PHP >= 8.0".
+#   - protobuf on 7.4: spc's validate() hard-fails "The latest protobuf extension
+#                      requires PHP 8.0 or later".
+# Both build fine on 8.0/8.1, so they are stripped for 7.4 ONLY. (These are the
+# only two extensions in LEGACY_EXTENSIONS with a throwing spc version gate under
+# the pinned SPC_REF — verified by sweeping src/SPC/builder/extension/*.php.)
 # Prints the comma-separated effective set for the given minor to stdout.
 extensions_for_minor() {
   local minor="${1:?usage: extensions_for_minor <minor>}" exts=",$EXTENSIONS,"
   case "$minor" in
-    7.4) exts="${exts//,opcache,/,}" ;;   # spc: opcache needs PHP >= 8.0
+    7.4)                                  # spc: both need PHP >= 8.0
+      exts="${exts//,opcache,/,}"
+      exts="${exts//,protobuf,/,}"
+      ;;
   esac
   exts="${exts#,}"; exts="${exts%,}"      # trim the sentinel commas
   echo "$exts"
