@@ -123,18 +123,27 @@ MANIFEST_SIG_NAME="$MANIFEST_NAME.minisig"
 # it. Downstream (build-target.sh, verify-artifact.sh) MUST build/verify against
 # extensions_for_minor "$MINOR", never $EXTENSIONS directly.
 #   - opcache on 7.4:  spc hard-fails "Statically compiled PHP with Zend Opcache
-#                      only available for PHP >= 8.0".
+#                      only available for PHP >= 8.0" (validate() throws).
 #   - protobuf on 7.4: spc's validate() hard-fails "The latest protobuf extension
 #                      requires PHP 8.0 or later".
-# Both build fine on 8.0/8.1, so they are stripped for 7.4 ONLY. (These are the
-# only two extensions in LEGACY_EXTENSIONS with a throwing spc version gate under
-# the pinned SPC_REF — verified by sweeping src/SPC/builder/extension/*.php.)
+#   - protobuf on 8.0: passes validate() but the pinned protobuf 5.34.1 C source
+#                      does NOT compile on 8.0 (ext/protobuf/array.c: undeclared
+#                      arginfo_offsetGet / parse errors — its generated arginfo
+#                      needs 8.1+). PECL declares min-php 8.2; only 8.1 (the newest
+#                      legacy minor, already published) actually builds it.
+# So: 7.4 drops opcache+protobuf; 8.0 drops protobuf; 8.1 keeps everything. (opcache
+# and protobuf are the only LEGACY_EXTENSIONS with a throwing spc *validate()* gate
+# — verified by sweeping src/SPC/builder/extension/*.php; the 8.0 protobuf drop is
+# a *compile* incompatibility found in CI, not a validate() gate.)
 # Prints the comma-separated effective set for the given minor to stdout.
 extensions_for_minor() {
   local minor="${1:?usage: extensions_for_minor <minor>}" exts=",$EXTENSIONS,"
   case "$minor" in
-    7.4)                                  # spc: both need PHP >= 8.0
+    7.4)                                  # opcache + protobuf need PHP >= 8.0
       exts="${exts//,opcache,/,}"
+      exts="${exts//,protobuf,/,}"
+      ;;
+    8.0)                                  # protobuf 5.34.1 won't compile on 8.0
       exts="${exts//,protobuf,/,}"
       ;;
   esac

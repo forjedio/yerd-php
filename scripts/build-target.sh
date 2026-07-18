@@ -68,14 +68,33 @@ EXTS="$(extensions_for_minor "$MINOR")"
 # --with-suggested-libs still pulls libcares in (swoole needs it); harmless
 # because §3 forced ENABLE_ARES=OFF so curl never uses it.
 #
-# LEGACY ONLY — inject the ext/intl C++17 backport via spc's --with-added-patch
-# hook (fires at before-php-buildconf). EOL 7.4/8.0 force intl to C++11 in
-# ext/intl/config.m4, which won't compile against spc's modern ICU (>= 75 needs
-# C++17); the injected script self-gates on PHP < 8.1, so 8.1 is untouched. Built
-# as an array so the empty-stable case is safe under `set -u` on bash 3.2 (macOS).
+# LEGACY ONLY — inject php-src source backports for EOL minors via spc's
+# --with-added-patch hook (each fires at before-php-buildconf and self-gates on the
+# PHP version, so higher minors / stable are untouched):
+#   spc-patch-legacy-intl-cxx17.php  (PHP < 8.1) — force ext/intl to C++17 so it
+#       compiles against spc's modern ICU (>= 75 needs C++17).
+#   spc-patch-legacy-gd-linktest.php (PHP < 8.0) — make 7.4's PHP_TEST_BUILD
+#       link-only (AC_RUN_IFELSE -> AC_LINK_IFELSE, as 8.0 did) so the GD build
+#       test doesn't execute a probe that segfaults on the macOS runner.
+#
+# The Linux build runs spc INSIDE the gnu-docker container, which mounts only
+# $SPC_DIR/{config,src,source,...} -> /app/*; the repo's scripts/ dir is NOT
+# mounted, so a host path to a patch is invisible in-container (spc aborts:
+# "Additional patch script file ... not found"). Copy each script into the mounted
+# config/ dir and reference it by the path valid for THIS runtime — an absolute
+# host path for native macOS, the in-container /app path for Linux docker.
+# build_args is an array so the empty-stable case is safe under `set -u` on the
+# macOS runner's bash 3.2.
 build_args=(build --build-cli --build-fpm "$EXTS" --with-suggested-libs)
 if [ "${CHANNEL:-stable}" = "legacy" ]; then
-  build_args+=(--with-added-patch="$here/spc-patch-legacy-intl-cxx17.php")
+  case "$OS" in
+    macos) patch_base="$SPC_DIR/config" ;;
+    linux) patch_base="/app/config" ;;   # docker mount of $SPC_DIR/config
+  esac
+  for p in spc-patch-legacy-intl-cxx17.php spc-patch-legacy-gd-linktest.php; do
+    cp "$here/$p" "$SPC_DIR/config/$p"
+    build_args+=(--with-added-patch="$patch_base/$p")
+  done
 fi
 "$CMD" "${build_args[@]}"
 
