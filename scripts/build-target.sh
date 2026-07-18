@@ -44,13 +44,16 @@ composer install --no-dev --no-interaction --optimize-autoloader
 # left untouched. Each patch fails loud if it no-ops (an spc refactor must be
 # caught, not silently skipped).
 #   1. -std=gnu17: 7.4/8.0/8.1 bundle K&R-style libbcmath that won't compile
-#      under the compiler's new C23 default. Patches config/env.ini.
+#      under the compiler's new C23 default. Patches config/env.ini. On macOS it
+#      also appends -Wno-error=incompatible-function-pointer-types, demoting the
+#      clang default-error from 7.4/8.0's non-const libxml2 error handler (const
+#      since libxml2 2.12) back to the warning Linux gcc already tolerates.
 #   2. libxml2 -> 2.13.x + libxslt -> 1.1.43: 2.14 dropped the ATTRIBUTE_UNUSED
 #      macro that 7.4/8.0's ext/libxml/libxml.c relies on, and spc's libxslt
 #      requires libxml2 >= 2.15.1 so it must drop back in lockstep. Patches
 #      config/source.json — MUST precede `spc download` so the pins are fetched.
 if [ "${CHANNEL:-stable}" = "legacy" ]; then
-  bash "$here/apply-legacy-cflags-patch.sh" "$SPC_DIR"
+  bash "$here/apply-legacy-cflags-patch.sh" "$SPC_DIR" "$OS"
   bash "$here/apply-legacy-libxml-patch.sh" "$SPC_DIR"
 fi
 
