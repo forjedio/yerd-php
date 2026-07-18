@@ -45,9 +45,10 @@ composer install --no-dev --no-interaction --optimize-autoloader
 # caught, not silently skipped).
 #   1. -std=gnu17: 7.4/8.0/8.1 bundle K&R-style libbcmath that won't compile
 #      under the compiler's new C23 default. Patches config/env.ini.
-#   2. libxml2 -> 2.13.x: 2.14 dropped the ATTRIBUTE_UNUSED macro that 7.4/8.0's
-#      ext/libxml/libxml.c relies on. Patches config/source.json — MUST precede
-#      `spc download` so the pinned tag is what gets fetched.
+#   2. libxml2 -> 2.13.x + libxslt -> 1.1.43: 2.14 dropped the ATTRIBUTE_UNUSED
+#      macro that 7.4/8.0's ext/libxml/libxml.c relies on, and spc's libxslt
+#      requires libxml2 >= 2.15.1 so it must drop back in lockstep. Patches
+#      config/source.json — MUST precede `spc download` so the pins are fetched.
 if [ "${CHANNEL:-stable}" = "legacy" ]; then
   bash "$here/apply-legacy-cflags-patch.sh" "$SPC_DIR"
   bash "$here/apply-legacy-libxml-patch.sh" "$SPC_DIR"
@@ -66,7 +67,17 @@ EXTS="$(extensions_for_minor "$MINOR")"
 
 # --with-suggested-libs still pulls libcares in (swoole needs it); harmless
 # because §3 forced ENABLE_ARES=OFF so curl never uses it.
-"$CMD" build --build-cli --build-fpm "$EXTS" --with-suggested-libs
+#
+# LEGACY ONLY — inject the ext/intl C++17 backport via spc's --with-added-patch
+# hook (fires at before-php-buildconf). EOL 7.4/8.0 force intl to C++11 in
+# ext/intl/config.m4, which won't compile against spc's modern ICU (>= 75 needs
+# C++17); the injected script self-gates on PHP < 8.1, so 8.1 is untouched. Built
+# as an array so the empty-stable case is safe under `set -u` on bash 3.2 (macOS).
+build_args=(build --build-cli --build-fpm "$EXTS" --with-suggested-libs)
+if [ "${CHANNEL:-stable}" = "legacy" ]; then
+  build_args+=(--with-added-patch="$here/spc-patch-legacy-intl-cxx17.php")
+fi
+"$CMD" "${build_args[@]}"
 
 for b in buildroot/bin/php buildroot/bin/php-fpm; do
   [ -f "$b" ] || { echo "FATAL: expected artifact $b missing after build"; exit 1; }
