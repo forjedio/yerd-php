@@ -15,9 +15,16 @@ PHP="${1:?php-bin}"; FPM="${2:?php-fpm-bin}"; MINOR="${3:?minor}"; OS="${4:?os}"
 
 fail() { echo "VERIFY FAIL: $*" >&2; exit 1; }
 
-# True if $1 is a member of the active channel's comma-separated EXTENSIONS set.
-# Assertions for optional-per-channel extensions (e.g. swoole, which the legacy
-# channel drops) are gated on this so the gate matches what was actually built.
+# Narrow EXTENSIONS to what THIS minor was actually built with — must match
+# build-target.sh, which builds against extensions_for_minor "$MINOR" (an EOL
+# minor may drop a member the rest of the channel keeps, e.g. opcache on 7.4).
+# Every has_ext gate below then reflects the real binary.
+EXTENSIONS="$(extensions_for_minor "$MINOR")"
+
+# True if $1 is a member of the effective (per-minor) comma-separated EXTENSIONS
+# set. Assertions for optional extensions (e.g. swoole, which the legacy channel
+# drops; opcache, which 7.4 drops) are gated on this so the gate matches what was
+# actually built.
 has_ext() { case ",$EXTENSIONS," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
 
 echo "== §5.1 #59 regression gate (no c-ares) =="
@@ -48,8 +55,11 @@ for m in curl swoole intl mbstring openssl sodium gd pdo_mysql pgsql redis zip; 
   has_ext "$m" || continue
   grep -iqx "$m" <<<"$mods" || fail "module '$m' missing from php -m"
 done
-# opcache is listed as "Zend OPcache", not "opcache".
-grep -iq "opcache" <<<"$mods" || fail "opcache missing from php -m"
+# opcache is listed as "Zend OPcache", not "opcache". Gate on the effective set:
+# 7.4 legitimately ships without it (spc can't build it as a static ext < 8.0).
+if has_ext opcache; then
+  grep -iq "opcache" <<<"$mods" || fail "opcache missing from php -m"
+fi
 echo "  bulk-set critical modules present."
 
 echo "== §5.3 php-fpm -t (valid config) =="

@@ -39,24 +39,34 @@ cd "$SPC_DIR"
 # this.) Canonical setup step — must run before any bin/spc invocation.
 composer install --no-dev --no-interaction --optimize-autoloader
 
-# LEGACY ONLY — force -std=gnu17 for the php-src compile BEFORE any spc command
-# reads config/env.ini. EOL minors (7.4/8.0/8.1) bundle K&R-style libbcmath that
-# won't compile under the compiler's new C23 default; stable is unaffected and
-# left untouched. Patches env.ini in the fresh checkout; fails loud if it no-ops.
+# LEGACY ONLY — two source-level pins applied to the fresh spc checkout BEFORE any
+# spc command reads its config. EOL minors need both; stable is unaffected and
+# left untouched. Each patch fails loud if it no-ops (an spc refactor must be
+# caught, not silently skipped).
+#   1. -std=gnu17: 7.4/8.0/8.1 bundle K&R-style libbcmath that won't compile
+#      under the compiler's new C23 default. Patches config/env.ini.
+#   2. libxml2 -> 2.13.x: 2.14 dropped the ATTRIBUTE_UNUSED macro that 7.4/8.0's
+#      ext/libxml/libxml.c relies on. Patches config/source.json — MUST precede
+#      `spc download` so the pinned tag is what gets fetched.
 if [ "${CHANNEL:-stable}" = "legacy" ]; then
   bash "$here/apply-legacy-cflags-patch.sh" "$SPC_DIR"
+  bash "$here/apply-legacy-libxml-patch.sh" "$SPC_DIR"
 fi
+
+# Effective extension set for THIS minor — never $EXTENSIONS directly (an EOL
+# minor may reject a member the rest of the channel keeps, e.g. opcache on 7.4).
+EXTS="$(extensions_for_minor "$MINOR")"
 
 # --- Build pipeline (§4) ------------------------------------------------------
 "$CMD" doctor --auto-fix
-"$CMD" download --with-php="$MINOR" --for-extensions="$EXTENSIONS" --prefer-pre-built --retry=5
+"$CMD" download --with-php="$MINOR" --for-extensions="$EXTS" --prefer-pre-built --retry=5
 
 # §3 — MUST run after download, before build. Fails the build if it no-ops.
 "$here/apply-curl-patch.sh" "$SPC_DIR"
 
 # --with-suggested-libs still pulls libcares in (swoole needs it); harmless
 # because §3 forced ENABLE_ARES=OFF so curl never uses it.
-"$CMD" build --build-cli --build-fpm "$EXTENSIONS" --with-suggested-libs
+"$CMD" build --build-cli --build-fpm "$EXTS" --with-suggested-libs
 
 for b in buildroot/bin/php buildroot/bin/php-fpm; do
   [ -f "$b" ] || { echo "FATAL: expected artifact $b missing after build"; exit 1; }

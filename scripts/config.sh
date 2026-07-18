@@ -55,6 +55,13 @@ STABLE_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,event,exif,filein
 # Everything else (incl. the real pdo_pgsql / pdo_sqlite modules the §5.5 gate
 # asserts) is kept. PROVISIONAL: the exact set can only be confirmed by the first
 # CI build — if spc rejects another ext on an EOL minor, trim it here.
+#
+# opcache is a SPECIAL case and stays in this list: spc can only build it as a
+# static ext for PHP >= 8.0 ("Statically compiled PHP with Zend Opcache only
+# available for PHP >= 8.0" — hard-fails on 7.4), but 8.0/8.1 build it fine.
+# Dropping it channel-wide would needlessly regress 8.0/8.1, so instead it is
+# stripped PER MINOR for 7.4 only — see extensions_for_minor() below, which every
+# build/verify step MUST go through rather than reading $EXTENSIONS directly.
 LEGACY_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,event,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
 
 # --- static-php-cli pinning (§3, §9) ------------------------------------------
@@ -107,6 +114,24 @@ case "$CHANNEL" in
   *) echo "FATAL: unknown CHANNEL '$CHANNEL' (want: stable|legacy)" >&2; exit 1 ;;
 esac
 MANIFEST_SIG_NAME="$MANIFEST_NAME.minisig"
+
+# --- Per-minor extension tweaks (EOL-minor quirks) ----------------------------
+# EXTENSIONS is one uniform set per channel, but a few EOL minors reject a member
+# the rest of the channel keeps. Deriving the effective set here — instead of
+# dropping the member channel-wide — avoids regressing the minors that DO support
+# it. Downstream (build-target.sh, verify-artifact.sh) MUST build/verify against
+# extensions_for_minor "$MINOR", never $EXTENSIONS directly.
+#   - opcache on 7.4: spc hard-fails "Statically compiled PHP with Zend Opcache
+#     only available for PHP >= 8.0". 8.0/8.1 build it fine, so strip for 7.4 only.
+# Prints the comma-separated effective set for the given minor to stdout.
+extensions_for_minor() {
+  local minor="${1:?usage: extensions_for_minor <minor>}" exts=",$EXTENSIONS,"
+  case "$minor" in
+    7.4) exts="${exts//,opcache,/,}" ;;   # spc: opcache needs PHP >= 8.0
+  esac
+  exts="${exts#,}"; exts="${exts%,}"      # trim the sentinel commas
+  echo "$exts"
+}
 
 # --- Targets (§1) --------------------------------------------------------------
 # token | runner | spc wrapper. Runner labels copied from static-php-cli-hosted.
