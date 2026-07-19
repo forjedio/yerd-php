@@ -148,6 +148,13 @@ if [ "$rc" -ne 0 ]; then
       # command error, so no best-effort commands that might fail here.
       xcrun lldb --batch -c "$core" buildroot/bin/php \
         -o 'thread backtrace all' -o 'quit' 2>&1 | tail -120
+      # The backtrace shows zend_startup_module_ex(module=...) with debug info, so pull
+      # that extension's name straight from the core. Separate session so a frame/expr
+      # mismatch can't abort the backtrace above. frame #9 is zend_startup_module_ex in
+      # the observed trace; print its `module->name`.
+      echo "--- culprit module name (from core, frame 9 = zend_startup_module_ex) ---"
+      xcrun lldb --batch -c "$core" buildroot/bin/php \
+        -o 'frame select 9' -o 'expr -- module->name' -o 'quit' 2>&1 | tail -12
       sudo rm -f "$core"
     else
       echo "(no core written; falling back to live lldb after enabling dev mode +"
@@ -182,11 +189,11 @@ PLIST
     codesign -s - -f --entitlements "$ent" buildroot/bin/php.dbg >/dev/null 2>&1
     xcrun lldb --batch \
       -o 'breakpoint set --name zend_startup_module_ex --skip-prologue false --auto-continue true' \
-      -o 'breakpoint command add --one-liner "expr -f string -- (char *)*(long *)($rdi + 32)" 1' \
+      -o 'breakpoint command add --one-liner "expr -- *(char **)($rdi + 32)" 1' \
       -o 'run' \
       -o 'thread backtrace' \
       -o 'quit' \
-      -- ./buildroot/bin/php.dbg -n -r 'echo "hi\n";' 2>&1 | tail -80
+      -- ./buildroot/bin/php.dbg -n -r 'echo "hi\n";' 2>&1 | grep -vE '^ *0x|Valid values|or "' | tail -60
     rm -f buildroot/bin/php.dbg
     echo "--- file / otool / codesign ---"
     file buildroot/bin/php
