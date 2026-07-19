@@ -99,7 +99,55 @@ if [ "${CHANNEL:-stable}" = "legacy" ]; then
     build_args+=(--with-added-patch="$patch_base/$p")
   done
 fi
-"$CMD" "${build_args[@]}"
+# DIAGNOSTIC SCAFFOLD (remove once the macOS x86_64 startup crash is fixed) —
+# spc's own CLI sanity check runs `php -n -r 'echo "hello";'` but DISCARDS the
+# test binary's stderr, so a startup crash surfaces only as "code: N, output:"
+# with N being the raw wait-status (e.g. 6 == killed by SIGABRT). If spc fails on
+# macOS and the binary exists, re-run the exact probe with stderr attached and
+# dump any crash report so the next run's log shows WHY it aborts.
+if ! "$CMD" "${build_args[@]}"; then
+  rc=$?
+  if [ "$OS" = "macos" ] && [ -x buildroot/bin/php ]; then
+    echo "======================================================================"
+    echo "spc build failed (rc=$rc). Re-running CLI probe with stderr attached:"
+    echo "======================================================================"
+    set +e
+    ./buildroot/bin/php -n -r 'echo "hello\n";'
+    echo ">>> probe raw exit status: $?"
+    echo "--- file ---";        file buildroot/bin/php
+    echo "--- otool -L ---";    otool -L buildroot/bin/php 2>&1 | head -50
+    echo "--- codesign -dv ---"; codesign -dv buildroot/bin/php 2>&1 | head -20
+    echo "--- newest php crash report (signal + faulting frames) ---"
+    crash="$(ls -t "$HOME/Library/Logs/DiagnosticReports"/php-*.ips 2>/dev/null | head -1)"
+    if [ -n "$crash" ]; then
+      echo "report: $crash"
+      # .ips = a JSON header line followed by a JSON body. Pull the termination
+      # signal and the faulting thread's frames (image name + offset) via python3,
+      # which the macOS runner ships; fall back to a raw head on any parse error.
+      python3 - "$crash" <<'PY' || sed -n '1,80p' "$crash"
+import json,sys
+lines=open(sys.argv[1]).read().splitlines()
+body=json.loads(lines[1]) if len(lines)>1 else json.loads(lines[0])
+t=body.get("termination",{})
+print("termination:",json.dumps(t))
+print("exception:",json.dumps(body.get("exception",{})))
+imgs=body.get("usedImages",[])
+def nm(i):
+    return imgs[i].get("name","?") if 0<=i<len(imgs) else "?"
+for th in body.get("threads",[]):
+    if th.get("triggered"):
+        print("faulting thread frames:")
+        for f in th.get("frames",[])[:25]:
+            print("   ",nm(f.get("imageIndex",-1)),"+",f.get("imageOffset"),f.get("symbol",""))
+        break
+PY
+    else
+      echo "(no php-*.ips crash report found)"
+    fi
+    set -e
+  fi
+  exit "$rc"
+fi
 
 for b in buildroot/bin/php buildroot/bin/php-fpm; do
   [ -f "$b" ] || { echo "FATAL: expected artifact $b missing after build"; exit 1; }
