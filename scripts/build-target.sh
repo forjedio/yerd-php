@@ -142,10 +142,11 @@ if [ "$rc" -ne 0 ]; then
     core="$(ls -t /cores/core.* 2>/dev/null | head -1)"
     if [ -n "$core" ]; then
       echo "core: $core ($(du -h "$core" | cut -f1))"
-      # --no-strip keeps the symbol table; also try to add the saved DWARF (spc
-      # writes it to buildroot/debug) so frames resolve to source file:line.
+      # --no-strip (set for this target above) keeps the symbol table in the binary,
+      # so frames resolve to real function names without a separate dSYM. Keep the
+      # command list minimal — lldb --batch aborts the whole session on the first
+      # command error, so no best-effort commands that might fail here.
       xcrun lldb --batch -c "$core" buildroot/bin/php \
-        -o 'target symbols add buildroot/debug/php.dwarf' \
         -o 'thread backtrace all' -o 'quit' 2>&1 | tail -120
       sudo rm -f "$core"
     else
@@ -162,6 +163,31 @@ PLIST
       xcrun lldb --batch -o 'run' -o 'thread backtrace all' -o 'quit' \
         -- ./buildroot/bin/php -n -r 'echo "hi\n";' 2>&1 | tail -120
     fi
+    echo "--- probe 4: name each extension as its MINIT starts; the LAST name printed"
+    echo "             before the abort is the extension whose MINIT overflows. This is"
+    echo "             symbol-resolution-proof (reads the arg), unlike the backtrace. ---"
+    # zend_startup_module_ex(zend_module_entry *module) — arg0 in %rdi (SysV). In the
+    # 7.4/8.x zend_module_entry the `const char *name` sits at offset 32 (size u16 @0,
+    # zend_api u32 @4, zend_debug/zts u8 @8/9, pad, ini_entry* @16, deps* @24, name @32).
+    # Break there, print the name, auto-continue; live debugging needs attach perms, so
+    # enable developer mode and ad-hoc-sign a copy with get-task-allow first.
+    sudo /usr/sbin/DevToolsSecurity -enable >/dev/null 2>&1
+    ent="$(mktemp -t gettaskallow).plist"
+    cat > "$ent" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>com.apple.security.get-task-allow</key><true/></dict></plist>
+PLIST
+    cp buildroot/bin/php buildroot/bin/php.dbg
+    codesign -s - -f --entitlements "$ent" buildroot/bin/php.dbg >/dev/null 2>&1
+    xcrun lldb --batch \
+      -o 'breakpoint set --name zend_startup_module_ex --skip-prologue false --auto-continue true' \
+      -o 'breakpoint command add --one-liner "expr -f string -- (char *)*(long *)($rdi + 32)" 1' \
+      -o 'run' \
+      -o 'thread backtrace' \
+      -o 'quit' \
+      -- ./buildroot/bin/php.dbg -n -r 'echo "hi\n";' 2>&1 | tail -80
+    rm -f buildroot/bin/php.dbg
     echo "--- file / otool / codesign ---"
     file buildroot/bin/php
     otool -L buildroot/bin/php 2>&1 | head -50
