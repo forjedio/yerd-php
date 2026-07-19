@@ -102,48 +102,60 @@ fi
 # DIAGNOSTIC SCAFFOLD (remove once the macOS x86_64 startup crash is fixed) —
 # spc's own CLI sanity check runs `php -n -r 'echo "hello";'` but DISCARDS the
 # test binary's stderr, so a startup crash surfaces only as "code: N, output:"
-# with N being the raw wait-status (e.g. 6 == killed by SIGABRT). If spc fails on
-# macOS and the binary exists, re-run the exact probe with stderr attached and
-# dump any crash report so the next run's log shows WHY it aborts.
-if ! "$CMD" "${build_args[@]}"; then
-  rc=$?
+# with N the raw wait-status (6 == killed by SIGABRT). GitHub runners don't run
+# ReportCrash, so no .ips is written; instead get the faulting stack live via
+# lldb (Xcode is installed) and use DYLD_PRINT_INITIALIZERS to tell a load-time
+# global-constructor crash from a MINIT crash. Capture rc explicitly — `if ! cmd`
+# would zero $?.
+set +e
+"$CMD" "${build_args[@]}"
+rc=$?
+set -e
+if [ "$rc" -ne 0 ]; then
   if [ "$OS" = "macos" ] && [ -x buildroot/bin/php ]; then
     echo "======================================================================"
-    echo "spc build failed (rc=$rc). Re-running CLI probe with stderr attached:"
+    echo "spc build failed (rc=$rc) — diagnosing macOS startup crash"
     echo "======================================================================"
     set +e
+    echo "--- probe 1: plain run, stderr attached ---"
     ./buildroot/bin/php -n -r 'echo "hello\n";'
-    echo ">>> probe raw exit status: $?"
-    echo "--- file ---";        file buildroot/bin/php
-    echo "--- otool -L ---";    otool -L buildroot/bin/php 2>&1 | head -50
-    echo "--- codesign -dv ---"; codesign -dv buildroot/bin/php 2>&1 | head -20
-    echo "--- newest php crash report (signal + faulting frames) ---"
-    crash="$(ls -t "$HOME/Library/Logs/DiagnosticReports"/php-*.ips 2>/dev/null | head -1)"
-    if [ -n "$crash" ]; then
-      echo "report: $crash"
-      # .ips = a JSON header line followed by a JSON body. Pull the termination
-      # signal and the faulting thread's frames (image name + offset) via python3,
-      # which the macOS runner ships; fall back to a raw head on any parse error.
-      python3 - "$crash" <<'PY' || sed -n '1,80p' "$crash"
-import json,sys
-lines=open(sys.argv[1]).read().splitlines()
-body=json.loads(lines[1]) if len(lines)>1 else json.loads(lines[0])
-t=body.get("termination",{})
-print("termination:",json.dumps(t))
-print("exception:",json.dumps(body.get("exception",{})))
-imgs=body.get("usedImages",[])
-def nm(i):
-    return imgs[i].get("name","?") if 0<=i<len(imgs) else "?"
-for th in body.get("threads",[]):
-    if th.get("triggered"):
-        print("faulting thread frames:")
-        for f in th.get("frames",[])[:25]:
-            print("   ",nm(f.get("imageIndex",-1)),"+",f.get("imageOffset"),f.get("symbol",""))
-        break
-PY
+    echo ">>> exit: $?"
+    echo "--- probe 2: dyld initializers (LAST line before it stops = culprit lib if the"
+    echo "             crash is a load-time global constructor; if 'init-done' prints"
+    echo "             then it dies later, in PHP MINIT) ---"
+    DYLD_PRINT_INITIALIZERS=1 ./buildroot/bin/php -n -r 'echo "init-done\n";' 2>&1 | tail -60
+    echo "--- probe 3: post-mortem backtrace via core dump (no debugger-attach perms"
+    echo "             needed, which live lldb attach lacks on CI) ---"
+    sudo sysctl -w kern.coredump=1 >/dev/null 2>&1
+    # /cores is root:wheel 0755 by default; the kernel writes the core as the
+    # crashing process's uid, so make it writable or the core is silently dropped.
+    sudo mkdir -p /cores 2>/dev/null; sudo chmod 1777 /cores 2>/dev/null
+    rm -f /cores/core.* 2>/dev/null
+    ( ulimit -c unlimited; ./buildroot/bin/php -n -r 'echo "hi\n";' ) 2>&1
+    core="$(ls -t /cores/core.* 2>/dev/null | head -1)"
+    if [ -n "$core" ]; then
+      echo "core: $core ($(du -h "$core" | cut -f1))"
+      xcrun lldb --batch -c "$core" buildroot/bin/php \
+        -o 'thread backtrace all' -o 'quit' 2>&1 | tail -120
+      sudo rm -f "$core"
     else
-      echo "(no php-*.ips crash report found)"
+      echo "(no core written; falling back to live lldb after enabling dev mode +"
+      echo " ad-hoc signing with get-task-allow so attach is permitted)"
+      sudo /usr/sbin/DevToolsSecurity -enable >/dev/null 2>&1
+      ent="$(mktemp -t gettaskallow).plist"
+      cat > "$ent" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>com.apple.security.get-task-allow</key><true/></dict></plist>
+PLIST
+      codesign -s - -f --entitlements "$ent" buildroot/bin/php >/dev/null 2>&1
+      xcrun lldb --batch -o 'run' -o 'thread backtrace all' -o 'quit' \
+        -- ./buildroot/bin/php -n -r 'echo "hi\n";' 2>&1 | tail -120
     fi
+    echo "--- file / otool / codesign ---"
+    file buildroot/bin/php
+    otool -L buildroot/bin/php 2>&1 | head -50
+    codesign -dv buildroot/bin/php 2>&1 | head -20
     set -e
   fi
   exit "$rc"
