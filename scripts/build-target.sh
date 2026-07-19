@@ -99,6 +99,13 @@ if [ "${CHANNEL:-stable}" = "legacy" ]; then
     build_args+=(--with-added-patch="$patch_base/$p")
   done
 fi
+# DIAGNOSTIC (remove with the scaffold below): keep the symbol table on the failing
+# macOS x86_64 target so a crash backtrace names the faulting MINIT function instead
+# of a stripped `.LL31` local. Scoped to this one target — it never ships (it fails);
+# arm64 still ships stripped.
+if [ "$OS" = "macos" ] && [ "$(uname -m)" = "x86_64" ]; then
+  build_args+=(--no-strip)
+fi
 # DIAGNOSTIC SCAFFOLD (remove once the macOS x86_64 startup crash is fixed) —
 # spc's own CLI sanity check runs `php -n -r 'echo "hello";'` but DISCARDS the
 # test binary's stderr, so a startup crash surfaces only as "code: N, output:"
@@ -135,7 +142,10 @@ if [ "$rc" -ne 0 ]; then
     core="$(ls -t /cores/core.* 2>/dev/null | head -1)"
     if [ -n "$core" ]; then
       echo "core: $core ($(du -h "$core" | cut -f1))"
+      # --no-strip keeps the symbol table; also try to add the saved DWARF (spc
+      # writes it to buildroot/debug) so frames resolve to source file:line.
       xcrun lldb --batch -c "$core" buildroot/bin/php \
+        -o 'target symbols add buildroot/debug/php.dwarf' \
         -o 'thread backtrace all' -o 'quit' 2>&1 | tail -120
       sudo rm -f "$core"
     else
