@@ -79,6 +79,10 @@ EXTS="$(extensions_for_minor "$MINOR")"
 #   spc-patch-legacy-gd-linktest.php (PHP < 8.0) — make 7.4's PHP_TEST_BUILD
 #       link-only (AC_RUN_IFELSE -> AC_LINK_IFELSE, as 8.0 did) so the GD build
 #       test doesn't execute a probe that segfaults on the macOS runner.
+#   spc-patch-legacy-zend-string-asm.php — route clang to the memcmp
+#       zend_string_equal_val fallback instead of PHP's x86_64 inline asm, which
+#       Xcode clang miscompiles into a stack-smash at module startup (arm64 and
+#       Linux gcc are unaffected; self-gates on the asm guard being present).
 #
 # The Linux build runs spc INSIDE the gnu-docker container, which mounts only
 # $SPC_DIR/{config,src,source,...} -> /app/*; the repo's scripts/ dir is NOT
@@ -94,7 +98,7 @@ if [ "${CHANNEL:-stable}" = "legacy" ]; then
     macos) patch_base="$SPC_DIR/config" ;;
     linux) patch_base="/app/config" ;;   # docker mount of $SPC_DIR/config
   esac
-  for p in spc-patch-legacy-intl-cxx17.php spc-patch-legacy-gd-linktest.php; do
+  for p in spc-patch-legacy-intl-cxx17.php spc-patch-legacy-gd-linktest.php spc-patch-legacy-zend-string-asm.php; do
     cp "$here/$p" "$SPC_DIR/config/$p"
     build_args+=(--with-added-patch="$patch_base/$p")
   done
