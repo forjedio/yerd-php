@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # §1 — package the two single-member tarballs with their exact contract names.
 #
-# Each archive must contain EXACTLY ONE regular file at the archive root:
+# UNIX (macos/linux): each archive contains EXACTLY ONE regular file at the root:
 #   *-cli-* -> a file named `php`
 #   *-fpm-* -> a file named `php-fpm`
 # No directory, extra members, or symlinks — yerd's extractor rejects anything else.
+#
+# WINDOWS: the artifact is a directory BUNDLE (§W) — the whole repackaged NTS tree
+# (php.exe + php-cgi.exe + php8.dll + ext/*.dll + libpq/openssl DLLs + php.ini) in
+# one `*-bundle-windows-*` tarball. The single-file rule does not apply; the daemon
+# extracts the tree and runs php-cgi.exe with the bundled php.ini.
 #
 # usage: package-artifacts.sh <php> <revision> <os> <arch> <bindir> <outdir>
 set -euo pipefail
@@ -34,5 +39,13 @@ package_one() {
   echo "packaged: $out"
 }
 
-package_one cli php
-package_one fpm php-fpm
+if [ "$OS" = "windows" ]; then
+  # BINDIR is the prepared bundle tree (winbuild/php). Archive it whole.
+  [ -f "$BINDIR/php.exe" ] && [ -f "$BINDIR/php-cgi.exe" ] || { echo "FATAL: $BINDIR is not a windows bundle (php.exe/php-cgi.exe missing)"; exit 1; }
+  out="$OUTDIR/$(asset_name "$PHP" "$REV" bundle "$OS" "$ARCH")"
+  tar -czf "$out" -C "$BINDIR" .
+  echo "packaged bundle: $out ($(tar -tzf "$out" | wc -l) members)"
+else
+  package_one cli php
+  package_one fpm php-fpm
+fi

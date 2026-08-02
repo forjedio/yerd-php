@@ -1,19 +1,37 @@
 #!/usr/bin/env bash
-# §4 + §10.2 — build CLI+FPM for one (minor, target) with static-php-cli.
+# §4 + §10.2 — build PHP for one (minor, target).
 #
-# Clones the pinned spc ref, applies the §3 curl.php patch, downloads sources,
-# builds, and (on macOS) ad-hoc signs both binaries. Leaves the two binaries at
-# $SPC_DIR/buildroot/bin/{php,php-fpm}. Packaging is a separate step (§1 shape).
+#   unix (macos/linux): static-php-cli — clone the pinned spc ref, apply the §3
+#     curl.php patch, download, build CLI + FPM, (macOS) ad-hoc sign
+#         -> $SPC_DIR/buildroot/bin/{php,php-fpm}
+#   windows: NOT spc — repackage the official windows.php.net NTS build into a
+#     directory bundle (§W in config.sh); delegates to repackage-windows.sh
+#         -> $WIN_OUT/php/{php.exe,php-cgi.exe,php8.dll,ext/,...}
+# Packaging is a separate step.
 #
-# usage: build-target.sh <minor> <os>
-#   <os> selects the spc wrapper (bin/spc on macOS, bin/spc-gnu-docker on Linux).
+# usage: build-target.sh <minor> <os> [php-version]
+#   php-version (full x.y.z) is REQUIRED for windows (the exact windows.php.net
+#   build to fetch) and ignored for unix (spc resolves the latest patch itself).
+#   CI passes the resolved matrix.php; scripts/build-local.sh resolves it locally.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=config.sh
 source "$here/config.sh"
 
-MINOR="${1:?usage: build-target.sh <minor> <os>}"
-OS="${2:?usage: build-target.sh <minor> <os>}"
+MINOR="${1:?usage: build-target.sh <minor> <os> [php-version]}"
+OS="${2:?usage: build-target.sh <minor> <os> [php-version]}"
+PHP_VER="${3:-}"
+
+# --- Windows leg — repackage, not spc (see §W in config.sh) -------------------
+# Windows uses a completely different model, so it branches out here before any
+# static-php-cli machinery runs.
+if [ "$OS" = "windows" ]; then
+  [ -n "$PHP_VER" ] || { echo "FATAL: windows needs the full php version as arg 3 (e.g. 8.4.24) — CI passes matrix.php; use scripts/build-local.sh locally"; exit 1; }
+  WIN_OUT="${WIN_OUT:-$PWD/winbuild}"
+  bash "$here/repackage-windows.sh" "$PHP_VER" x86_64 "$WIN_OUT"
+  echo "build-target: $MINOR/$OS complete -> $WIN_OUT/php"
+  exit 0
+fi
 
 SPC_DIR="${SPC_DIR:-$PWD/static-php-cli}"
 case "$OS" in

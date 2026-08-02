@@ -7,6 +7,8 @@
 /downloads/
 /buildroot/
 /dist/
+/winbuild/
+/.winpkg/
 /*.tar.gz
 # Local test scratch
 /latest.json

@@ -130,28 +130,42 @@ jobs:
         with:
           php-version: "8.4"
       - name: Build ${{ matrix.name }} (§4)
+        # shell: bash so the windows-latest leg runs under Git Bash (backslash line
+        # continuations, ${BASH_SOURCE}, etc.), not pwsh; harmless on unix runners.
+        shell: bash
         env:
           # spc's --prefer-pre-built fetches dependency packages from the
           # static-php-cli-hosted releases via api.github.com; unauthenticated
           # CI shares IPs and hits the 60-req/hr limit (HTTP 403). spc reads
-          # GITHUB_TOKEN (CurlHook::setupGithubToken) to authenticate.
+          # GITHUB_TOKEN (CurlHook::setupGithubToken) to authenticate. (windows
+          # ignores it — it just downloads the official build over https.)
           GITHUB_TOKEN: ${{ github.token }}
-        run: bash scripts/build-target.sh "${{ matrix.minor }}" "${{ matrix.os }}"
+        # arg3 (php version) is used by the windows repackage leg and ignored by unix.
+        run: bash scripts/build-target.sh "${{ matrix.minor }}" "${{ matrix.os }}" "${{ matrix.php }}"
       - name: Verify §5 gate
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}     # for the cross-repo real-ext download
         run: |
-          bash scripts/verify-artifact.sh \
-            static-php-cli/buildroot/bin/php \
-            static-php-cli/buildroot/bin/php-fpm \
+          # unix: spc buildroot binaries + arg2 php-fpm.
+          # windows: the repackaged bundle tree + arg2 php-cgi.exe.
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            bin="winbuild/php/php.exe"; sapi2="winbuild/php/php-cgi.exe"
+          else
+            bin="static-php-cli/buildroot/bin/php"; sapi2="static-php-cli/buildroot/bin/php-fpm"
+          fi
+          bash scripts/verify-artifact.sh "$bin" "$sapi2" \
             "${{ matrix.minor }}" "${{ matrix.os }}" "${{ matrix.arch }}"
-      - name: Package the two single-member tarballs (§1)
+      - name: Package the artifact(s) (§1)
+        shell: bash
         run: |
           mkdir -p dist
+          # unix packages cli+fpm from buildroot/bin; windows bundles the whole tree.
+          if [ "${{ matrix.os }}" = "windows" ]; then bindir="winbuild/php"; else bindir="static-php-cli/buildroot/bin"; fi
           bash scripts/package-artifacts.sh \
             "${{ matrix.php }}" "${{ matrix.revision }}" \
             "${{ matrix.os }}" "${{ matrix.arch }}" \
-            static-php-cli/buildroot/bin dist
+            "$bindir" dist
       # spc writes the real compiler/linker error to log/ (NOT the console — the
       # console only shows the failed command + exit code). Capture it on failure
       # so an extension that won't compile on an EOL PHP can actually be pinned

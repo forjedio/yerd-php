@@ -10,6 +10,11 @@ consumes at runtime.
 README only maps that brief onto the files here. If the two disagree, the brief
 wins.
 
+> **Windows works differently.** The static CLI + FPM model below is macOS and
+> Linux only. Windows has no static build and no FPM, so its leg repackages the
+> official windows.php.net build into a directory bundle (php.exe + php-cgi.exe +
+> DLLs). See [`README-WINDOWS.md`](./README-WINDOWS.md).
+
 ## What runs
 
 [`.github/workflows/release.yml`](.github/workflows/release.yml) is triggered

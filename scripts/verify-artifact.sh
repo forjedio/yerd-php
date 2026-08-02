@@ -3,17 +3,102 @@
 # Any failure fails the job: never publish an unverified, c-ares-enabled, or
 # ABI-mismatched binary.
 #
-# usage: verify-artifact.sh <php-bin> <php-fpm-bin> <minor> <os> <arch>
+# usage: verify-artifact.sh <php-bin> <second-sapi-bin> <minor> <os> <arch>
+#   second-sapi-bin is php-fpm on unix, php-cgi(.exe) on windows.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=config.sh
 source "$here/config.sh"
 
-PHP="${1:?php-bin}"; FPM="${2:?php-fpm-bin}"; MINOR="${3:?minor}"; OS="${4:?os}"; ARCH="${5:?arch}"
-[ -x "$PHP" ] || chmod +x "$PHP"
-[ -x "$FPM" ] || chmod +x "$FPM"
+PHP="${1:?php-bin}"; SECONDARY="${2-}"; MINOR="${3:?minor}"; OS="${4:?os}"; ARCH="${5:?arch}"
 
 fail() { echo "VERIFY FAIL: $*" >&2; exit 1; }
+
+# --- Windows bundle gate (repackage model) ------------------------------------
+# The windows artifact is a DLL-based directory bundle (official NTS build), not
+# an spc static binary, so it has its own self-contained gate and returns before
+# the unix flow. arg2 is php-cgi.exe. Extensions load via the generated php.ini
+# sitting next to php.exe, so every invocation passes `-c <bundle>/php.ini`.
+if [ "$OS" = "windows" ]; then
+  CGI="$SECONDARY"
+  TREE="$(dirname "$PHP")"
+  INI="$TREE/php.ini"
+  CA="$TREE/cacert.pem"
+  [ -f "$PHP" ] || fail "php.exe not found at '$PHP'"
+  [ -f "$CGI" ] || fail "php-cgi.exe not found at '$CGI'"
+  [ -f "$INI" ] || fail "generated php.ini not found at '$INI'"
+  [ -f "$CA" ]  || fail "bundled cacert.pem not found at '$CA'"
+  # Pass the CA bundle by absolute path — exactly what the daemon does at install
+  # (curl.cainfo/openssl.cafile can't be relative). Proves the bundle+cert work.
+  P=("$PHP" -c "$INI" -d "curl.cainfo=$CA" -d "openssl.cafile=$CA")
+  C=("$CGI" -c "$INI" -d "curl.cainfo=$CA" -d "openssl.cafile=$CA")
+
+  echo "== §5.1 no c-ares (windows curl) =="
+  # Official windows curl has no c-ares, so CURLOPT_DNS_SERVERS must be rejected.
+  dns="$("${P[@]}" -r 'var_export(curl_setopt(curl_init(), CURLOPT_DNS_SERVERS, "127.0.0.1"));' 2>/dev/null || true)"
+  echo "  curl_setopt(CURLOPT_DNS_SERVERS) => $dns"
+  [ "$dns" = "false" ] || fail "c-ares present in curl (got '$dns', want false)"
+  ok="$("${P[@]}" -r '$ch=curl_init("https://www.php.net/");curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_NOBODY=>true,CURLOPT_TIMEOUT=>30]);curl_exec($ch);echo curl_errno($ch)===0?"ok":("err:".curl_error($ch));' 2>/dev/null || true)"
+  echo "  curl_exec positive control => $ok"
+  [ "$ok" = "ok" ] || fail "curl_exec positive control failed ($ok) — broken resolver"
+
+  echo "== §5.2 php -v / php -m (bulk set + pgsql present) =="
+  "${P[@]}" -v >/dev/null || fail "php -v did not run"
+  mods="$("${P[@]}" -m)"
+  for m in curl intl mbstring openssl sodium gd pdo_mysql pgsql pdo_pgsql pdo_sqlite sqlite3 zip soap; do
+    grep -iqx "$m" <<<"$mods" || fail "module '$m' missing from php -m"
+  done
+  grep -iq "opcache" <<<"$mods" || fail "opcache missing from php -m"
+  echo "  bulk-set + pgsql present."
+  # PECL extensions are added best-effort; whichever DLLs landed in the bundle
+  # MUST actually load (a present-but-unloadable DLL is a packaging bug).
+  for pe in redis apcu igbinary msgpack imagick; do
+    [ -f "$TREE/ext/php_${pe}.dll" ] || continue
+    grep -iqx "$pe" <<<"$mods" || fail "PECL extension '$pe' is in the bundle but did not load"
+  done
+  echo "  bundled PECL extensions load."
+
+  echo "== §5.3 php-cgi.exe (FastCGI serving SAPI) =="
+  "${C[@]}" -v 2>&1 | grep -iq "cgi-fcgi" || fail "php-cgi -v did not report cgi-fcgi"
+  cgimods="$("${C[@]}" -m 2>/dev/null || true)"
+  for m in curl pgsql pdo_pgsql pdo_sqlite; do
+    grep -iqx "$m" <<<"$cgimods" || fail "php-cgi -m missing '$m' (cgi diverged from cli?)"
+  done
+  echo "  php-cgi.exe runs (cgi-fcgi) and carries pgsql + the bulk modules."
+
+  echo "== §5.4 real PDO (pgsql + sqlite drivers) =="
+  pdo="$("${P[@]}" -r '
+    $fail = [];
+    foreach (["pgsql","pdo_pgsql","pdo_sqlite"] as $m) if (!extension_loaded($m)) $fail[] = "extension_loaded($m) !== true";
+    $drivers = PDO::getAvailableDrivers();
+    foreach (["mysql","pgsql","sqlite"] as $d) if (!in_array($d,$drivers,true)) $fail[] = "driver \"$d\" missing";
+    try { $one = (new PDO("sqlite::memory:"))->query("SELECT 1")->fetchColumn(); if ((string)$one !== "1") $fail[]="SELECT 1 => ".var_export($one,true); }
+    catch (\Throwable $e) { $fail[] = "new PDO(sqlite::memory:) threw: ".$e->getMessage(); }
+    echo $fail ? ("FAIL: ".implode("; ",$fail)) : "ok";
+  ' 2>/dev/null || true)"
+  echo "  pdo module/driver agreement => $pdo"
+  [ "$pdo" = "ok" ] || fail "windows PDO gate: $pdo"
+
+  echo "== §5.5 ZEND_MODULE_API_NO (yerd-php-ext ABI) =="
+  # This DLL build loads dynamic extensions (that is the whole point — yerd-dump.dll
+  # can load), but yerd-php-ext does not yet publish windows .dll assets, so assert
+  # the ABI number matches its pin. Backfill a real yerd-dump.dll load-check when
+  # the ext ships windows artifacts.
+  want=""
+  for kv in $ZEND_API_NOS; do [ "${kv%%:*}" = "$MINOR" ] && want="${kv##*:}"; done
+  [ -n "$want" ] || fail "no ZEND_MODULE_API_NO pinned for minor $MINOR"
+  got="$("${P[@]}" -i | sed -n 's/^PHP API => \([0-9]\{8\}\).*/\1/p' | head -1)"
+  echo "  ZEND_MODULE_API_NO got=$got want=$want"
+  [ "$got" = "$want" ] || fail "ZEND_MODULE_API_NO mismatch (got '$got', want '$want')"
+
+  echo "VERIFY OK (windows bundle): $MINOR $OS-$ARCH"
+  exit 0
+fi
+
+# --- Unix gate (macos/linux, static-php-cli) ----------------------------------
+FPM="${SECONDARY:?php-fpm-bin}"
+[ -x "$PHP" ] || chmod +x "$PHP"
+[ -x "$FPM" ] || chmod +x "$FPM"
 
 # Narrow EXTENSIONS to what THIS minor was actually built with — must match
 # build-target.sh, which builds against extensions_for_minor "$MINOR" (an EOL
