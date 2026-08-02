@@ -65,6 +65,33 @@ STABLE_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,event,exif,filein
 # through rather than reading $EXTENSIONS directly.
 LEGACY_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,event,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
 
+# --- Windows extension set (repackage model, NOT spc) -------------------------
+# The Windows leg does NOT use static-php-cli (see the TARGETS note + §W below):
+# it repackages the official windows.php.net NTS build, whose extensions ship as
+# DLLs. scripts/repackage-windows.sh enables every STABLE_EXTENSIONS member that
+# is present as a bundled `ext/php_<name>.dll` in that build (built-ins need no
+# line); the intersection is computed at build time, so there is no separate
+# Windows list to drift. PECL-only members not in the official bundle are added
+# from WINDOWS_PECL below.
+
+# PECL extensions to add to the Windows bundle: prebuilt NTS x64 DLLs pulled from
+# windows.php.net/downloads/pecl and dropped into the bundle's ext/. PINNED by
+# version for reproducibility (re-verify availability on a bump). Availability is
+# per (ext, version, minor, vs-tag): a pin with no matching Windows DLL for a
+# given minor is a LOUD WARN (the core bundle still ships), not a hard failure.
+# Serializers (igbinary, msgpack) are listed FIRST so they load before redis/apcu,
+# which use them. Format: "<ext>:<version>".
+WINDOWS_PECL="igbinary:3.2.16 msgpack:3.0.1 redis:6.3.0 apcu:5.1.28"
+
+# imagick is handled separately from WINDOWS_PECL because it is not a single DLL.
+# Its PECL zip ships php_imagick.dll AND ImageMagick's own runtime (~160 CORE_RL_*,
+# IM_MOD_RL_*, FILTER_* DLLs) which must live next to php.exe, not in ext/ (the
+# Windows loader searches the exe dir for a loaded DLL's dependencies). That adds
+# ~60 MB to the bundle. Pin the version (re-verify on bump); blank to skip. Still
+# not covered (harder or absent Windows builds): imap, event, opentelemetry,
+# protobuf — addable on demand via the standard PECL-DLL-in-ext/ mechanism.
+WINDOWS_IMAGICK="3.8.1"
+
 # --- static-php-cli pinning (§3, §9) ------------------------------------------
 # PIN the ref and re-verify the curl.php c-ares patch on every bump
 # (curl.php is under upstream refactor — RFC #959/#963). The §3 patch step
@@ -136,6 +163,8 @@ MANIFEST_SIG_NAME="$MANIFEST_NAME.minisig"
 # — verified by sweeping src/SPC/builder/extension/*.php; the 8.0 protobuf drop is
 # a *compile* incompatibility found in CI, not a validate() gate.)
 # Prints the comma-separated effective set for the given minor to stdout.
+# (Unix/spc only — the Windows leg repackages a prebuilt PHP and derives its own
+# enable-list in repackage-windows.sh, so it never calls this.)
 extensions_for_minor() {
   local minor="${1:?usage: extensions_for_minor <minor>}" exts=",$EXTENSIONS,"
   case "$minor" in
@@ -160,7 +189,25 @@ macos aarch64 macos-15 bin/spc
 macos x86_64 macos-15-intel bin/spc
 linux x86_64 ubuntu-latest bin/spc-gnu-docker
 linux aarch64 ubuntu-24.04-arm bin/spc-gnu-docker
+windows x86_64 windows-latest repackage
 EOF
+# §W — Windows is a DIFFERENT build model. spc builds a STATIC php on Windows,
+# which can neither load dynamic extensions (yerd-php-ext's yerd-dump.dll) nor
+# link libpq (pgsql). So — like Laravel Herd — the windows leg REPACKAGES the
+# official windows.php.net NTS build (php.exe + php-cgi.exe + php8.dll + ext/*.dll
+# + libpq/openssl DLLs) into a directory bundle, via scripts/repackage-windows.sh
+# (the "repackage" wrapper token above marks it). Consequences vs the unix legs:
+#   - the artifact is a directory bundle, not a single-member tarball (§1 relaxed
+#     for windows only); the manifest carries a `bundle` asset, not cli/fpm.
+#   - php-cgi.exe is the FastCGI serving binary (windows has no fpm SAPI).
+#   - extensions load dynamically, so yerd-dump.dll works and pgsql is available.
+#   - the c-ares (#59) problem is absent — official windows curl has no c-ares.
+# windows builds in BOTH channels: legacy is just another download (7.4=vc15,
+# 8.0/8.1=vs16), with none of the Unix legacy patching, so there is nothing to
+# gate. All legacy minors get the full extension set (pgsql + PECL included);
+# 7.4's only quirk is that gd ships as php_gd2.dll, which repackage-windows.sh
+# handles. Each windows minor's enable-list is derived from the official build's
+# own ext/ DLLs, so the channel EXTENSIONS split does not apply.
 
 # Base download URL for the rolling release (used by the §5 real-ext gate).
 release_base_url() { echo "https://github.com/${1:-$GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}"; }

@@ -86,15 +86,17 @@ foreach ($built as $e) {
     foreach (['minor', 'php', 'os', 'arch', 'revision'] as $k) if (!isset($e[$k])) fail("built entry missing $k");
     if (!isset($supported[$e['minor']])) fail("built entry for unsupported minor {$e['minor']}");
     $rev = (int) $e['revision'];
-    $index["{$e['minor']}|{$e['os']}|{$e['arch']}"] = [
-        'php'      => $e['php'],
-        'minor'    => $e['minor'],
-        'os'       => $e['os'],
-        'arch'     => $e['arch'],
-        'revision' => $rev,
-        'cli'      => asset_obj($assetsDir, $e['php'], $rev, 'cli', $e['os'], $e['arch']),
-        'fpm'      => asset_obj($assetsDir, $e['php'], $rev, 'fpm', $e['os'], $e['arch']),
-    ];
+    $base = ['php' => $e['php'], 'minor' => $e['minor'], 'os' => $e['os'], 'arch' => $e['arch'], 'revision' => $rev];
+    if ($e['os'] === 'windows') {
+        // windows is one directory bundle (§W): a single `bundle` asset, no cli/fpm.
+        $entry = $base + ['bundle' => asset_obj($assetsDir, $e['php'], $rev, 'bundle', $e['os'], $e['arch'])];
+    } else {
+        $entry = $base + [
+            'cli' => asset_obj($assetsDir, $e['php'], $rev, 'cli', $e['os'], $e['arch']),
+            'fpm' => asset_obj($assetsDir, $e['php'], $rev, 'fpm', $e['os'], $e['arch']),
+        ];
+    }
+    $index["{$e['minor']}|{$e['os']}|{$e['arch']}"] = $entry;
 }
 
 // 3. validate + normalise every final entry (§7 field rules).
@@ -103,13 +105,15 @@ usort($builds, fn($a, $b) => [$a['minor'], $a['os'], $a['arch']] <=> [$b['minor'
 
 $seen = [];
 foreach ($builds as $b) {
-    foreach (['php', 'minor', 'os', 'arch', 'revision', 'cli', 'fpm'] as $k) if (!isset($b[$k])) fail("final entry missing $k: " . json_encode($b));
+    // windows ships one directory bundle; unix ships cli+fpm single-file tarballs.
+    $kinds = ($b['os'] ?? '') === 'windows' ? ['bundle'] : ['cli', 'fpm'];
+    foreach (array_merge(['php', 'minor', 'os', 'arch', 'revision'], $kinds) as $k) if (!isset($b[$k])) fail("final entry missing $k: " . json_encode($b));
     if (!preg_match('/^\d+\.\d+\.\d+$/', $b['php'])) fail("bad php '{$b['php']}'");
     if (!str_starts_with($b['php'], $b['minor'] . '.')) fail("minor '{$b['minor']}' != prefix of php '{$b['php']}'");
-    if (!in_array($b['os'], ['macos', 'linux'], true)) fail("bad os '{$b['os']}'");
+    if (!in_array($b['os'], ['macos', 'linux', 'windows'], true)) fail("bad os '{$b['os']}'");
     if (!in_array($b['arch'], ['aarch64', 'x86_64'], true)) fail("bad arch '{$b['arch']}'");
     if ((int) $b['revision'] < 1) fail("revision must be >= 1 for {$b['php']} {$b['os']}-{$b['arch']}");
-    foreach (['cli', 'fpm'] as $kind) {
+    foreach ($kinds as $kind) {
         $o = $b[$kind];
         if (empty($o['file']) || !preg_match('/^[0-9a-f]{64}$/', $o['sha256'] ?? '') || (int) ($o['size'] ?? 0) < 1)
             fail("bad $kind object for {$b['php']} {$b['os']}-{$b['arch']}");
