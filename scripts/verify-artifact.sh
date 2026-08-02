@@ -30,8 +30,11 @@ if [ "$OS" = "windows" ]; then
   [ -f "$CA" ]  || fail "bundled cacert.pem not found at '$CA'"
   # Pass the CA bundle by absolute path — exactly what the daemon does at install
   # (curl.cainfo/openssl.cafile can't be relative). Proves the bundle+cert work.
-  P=("$PHP" -c "$INI" -d "curl.cainfo=$CA" -d "openssl.cafile=$CA")
-  C=("$CGI" -c "$INI" -d "curl.cainfo=$CA" -d "openssl.cafile=$CA")
+  # display_startup_errors=0: a failed extension load prints a startup warning to
+  # stdout on the CLI SAPI, which would corrupt the captures below; the §5.2/§5.4
+  # module assertions still catch a genuinely missing extension.
+  P=("$PHP" -c "$INI" -d "display_startup_errors=0" -d "curl.cainfo=$CA" -d "openssl.cafile=$CA")
+  C=("$CGI" -c "$INI" -d "display_startup_errors=0" -d "curl.cainfo=$CA" -d "openssl.cafile=$CA")
 
   echo "== §5.1 no c-ares (windows curl) =="
   # Official windows curl has no c-ares, so CURLOPT_DNS_SERVERS must be rejected.

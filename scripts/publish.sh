@@ -61,8 +61,9 @@ on_release() { printf '%s\n' "${current_assets[@]:-}" | grep -qxF "$1"; }
 
 keep="$(mktemp)"; trap 'rm -f "$keep"' EXIT
 
-# Files referenced by the manifest we just built (fresh, on disk).
-jq -r '.builds[] | .cli.file, .fpm.file' "$MANIFEST" >> "$keep"
+# Files referenced by the manifest we just built (fresh, on disk). Unix entries
+# carry cli+fpm; windows entries carry a single bundle — keep whichever exist.
+jq -r '.builds[] | (.cli.file // empty), (.fpm.file // empty), (.bundle.file // empty)' "$MANIFEST" >> "$keep"
 
 # Union in every OTHER channel's referenced assets. A sibling manifest that is
 # NOT among the release's current assets simply hasn't published yet (safe to
@@ -80,7 +81,7 @@ for m in $(all_manifest_names); do
   gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
     --pattern "$m" --output "$sib" --clobber \
     || { rm -f "$sib"; echo "FATAL: sibling manifest $m is on the release but could not be downloaded — refusing to prune (would delete its still-referenced tarballs)."; exit 1; }
-  jq -r '.builds[]? | .cli.file, .fpm.file' "$sib" >> "$keep" \
+  jq -r '.builds[]? | (.cli.file // empty), (.fpm.file // empty), (.bundle.file // empty)' "$sib" >> "$keep" \
     || { rm -f "$sib"; echo "FATAL: sibling manifest $m is unparseable — refusing to prune."; exit 1; }
   rm -f "$sib"
   echo "  kept sibling $m's referenced assets."

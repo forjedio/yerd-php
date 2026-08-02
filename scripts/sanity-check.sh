@@ -31,6 +31,6 @@ while IFS=$'\t' read -r file sha; do
   got="$(curl -fsSL --retry 5 "$base/$file" | shasum -a 256 | awk '{print $1}')"
   [ "$got" = "$sha" ] || { echo "FATAL: sha mismatch for $file (got $got want $sha)"; exit 1; }
   echo "  ok: $file"
-done < <(jq -r '.builds[] | (.cli.file+"\t"+.cli.sha256), (.fpm.file+"\t"+.fpm.sha256)' "$tmp/$MANIFEST_NAME")
+done < <(jq -r '.builds[] | (.cli, .fpm, .bundle | select(. != null) | .file + "\t" + .sha256)' "$tmp/$MANIFEST_NAME")
 
 echo "sanity-check: OK ($n assets verified against signed manifest)."
