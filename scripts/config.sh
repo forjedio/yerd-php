@@ -189,8 +189,14 @@ macos aarch64 macos-15 bin/spc
 macos x86_64 macos-15-intel bin/spc
 linux x86_64 ubuntu-latest bin/spc-gnu-docker
 linux aarch64 ubuntu-24.04-arm bin/spc-gnu-docker
-windows x86_64 windows-latest repackage
 EOF
+# WINDOWS TEMPORARILY DISABLED (do not re-add this row as-is). The `bundle` entry
+# shape breaks the daemon's php.json parser (crates/yerd-php/src/release.rs wants
+# cli+fpm on every entry), which empties the WHOLE installable-versions list —
+# macOS included. Windows must be re-introduced via a SEPARATE manifest
+# (php-windows.json), never merged into php.json/php-legacy.json — same pattern
+# as pcov's separate manifest. Until then, generate-manifest.php also drops any
+# carried-over windows entries so a clean run heals the poisoned live manifests.
 # §W — Windows is a DIFFERENT build model. spc builds a STATIC php on Windows,
 # which can neither load dynamic extensions (yerd-php-ext's yerd-dump.dll) nor
 # link libpq (pgsql). So — like Laravel Herd — the windows leg REPACKAGES the
