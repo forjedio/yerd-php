@@ -1,0 +1,79 @@
+name: refresh-manifests
+
+# Manifest-only refresh: regenerate + re-sign + re-publish the signed manifests
+# from the ALREADY-published assets, with NO rebuild (scripts/refresh-manifests.sh).
+# Use to re-split windows bundle entries out of php.json into php-windows.json
+# (§W), or any manifest-shape fix, when the binaries are already on the release.
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Which channel(s) to refresh."
+        required: false
+        type: choice
+        options: [both, stable, legacy]
+        default: both
+
+permissions:
+  contents: write               # update the rolling release's manifests/assets
+
+# Share release.yml's concurrency group so a refresh and a build can never both
+# run the shared-release prune and collide.
+concurrency:
+  group: yerd-php-release
+  cancel-in-progress: false
+
+jobs:
+  stable:
+    if: ${{ inputs.channel == 'both' || inputs.channel == 'stable' }}
+    runs-on: ubuntu-latest
+    env:
+      CHANNEL: stable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+      - name: Install minisign
+        run: sudo apt-get update && sudo apt-get install -y minisign
+      - name: Refresh manifests (no rebuild)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          MINISIGN_PUBLIC_KEY: ${{ vars.MINISIGN_PUBLIC_KEY }}
+        run: bash scripts/refresh-manifests.sh
+      - name: Post-refresh sanity (§10.8)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MINISIGN_PUBLIC_KEY: ${{ vars.MINISIGN_PUBLIC_KEY }}
+        run: bash scripts/sanity-check.sh
+
+  legacy:
+    # `needs: stable` + `always()` serialises legacy AFTER stable when both run
+    # (shared-release prune must not race), yet still runs legacy when stable is
+    # skipped (dispatch with channel=legacy).
+    needs: [stable]
+    if: ${{ always() && (inputs.channel == 'both' || inputs.channel == 'legacy') }}
+    runs-on: ubuntu-latest
+    env:
+      CHANNEL: legacy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+      - name: Install minisign
+        run: sudo apt-get update && sudo apt-get install -y minisign
+      - name: Refresh manifests (no rebuild)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          MINISIGN_PUBLIC_KEY: ${{ vars.MINISIGN_PUBLIC_KEY }}
+        run: bash scripts/refresh-manifests.sh
+      - name: Post-refresh sanity (§10.8)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MINISIGN_PUBLIC_KEY: ${{ vars.MINISIGN_PUBLIC_KEY }}
+        run: bash scripts/sanity-check.sh

@@ -122,8 +122,13 @@ RELEASE_TAG="php"                     # single rolling release; create once, nev
 # assets so publishing one channel never prunes another's tarballs (§6). Keep in
 # sync with the per-channel case block below. Format: "<channel>:<manifest>".
 CHANNELS="stable:php.json legacy:php-legacy.json"
-# All manifest basenames across channels (space separated). Sig = "<name>.minisig".
-all_manifest_names() { for c in $CHANNELS; do echo "${c#*:}"; done; }
+# Windows entries live in a SEPARATE per-channel manifest (§W) so the daemon's
+# cli/fpm php.json parser never sees the bundle shape.
+WINDOWS_CHANNELS="stable:php-windows.json legacy:php-windows-legacy.json"
+# All manifest basenames across channels (unix + windows). Sig = "<name>.minisig".
+# publish.sh unions the assets referenced by ALL of these so one channel/manifest
+# never prunes another's tarballs.
+all_manifest_names() { for c in $CHANNELS $WINDOWS_CHANNELS; do echo "${c#*:}"; done; }
 
 # --- Per-channel knobs (swapped by $CHANNEL) ----------------------------------
 # Downstream scripts read SUPPORTED_MINORS / EXTENSIONS / MANIFEST_NAME only, so
@@ -133,15 +138,18 @@ case "$CHANNEL" in
     SUPPORTED_MINORS="$STABLE_MINORS"
     EXTENSIONS="$STABLE_EXTENSIONS"
     MANIFEST_NAME="php.json"
+    WINDOWS_MANIFEST_NAME="php-windows.json"
     ;;
   legacy)
     SUPPORTED_MINORS="$LEGACY_MINORS"
     EXTENSIONS="$LEGACY_EXTENSIONS"
     MANIFEST_NAME="php-legacy.json"
+    WINDOWS_MANIFEST_NAME="php-windows-legacy.json"
     ;;
   *) echo "FATAL: unknown CHANNEL '$CHANNEL' (want: stable|legacy)" >&2; exit 1 ;;
 esac
-MANIFEST_SIG_NAME="$MANIFEST_NAME.minisig"
+MANIFEST_SIG_NAME="$MANIFEST_NAME.minisig"                 # unix manifest (macos/linux, cli+fpm)
+WINDOWS_MANIFEST_SIG_NAME="$WINDOWS_MANIFEST_NAME.minisig" # windows manifest (bundle) — §W
 
 # --- Per-minor extension tweaks (EOL-minor quirks) ----------------------------
 # EXTENSIONS is one uniform set per channel, but a few EOL minors reject a member
@@ -189,14 +197,21 @@ macos aarch64 macos-15 bin/spc
 macos x86_64 macos-15-intel bin/spc
 linux x86_64 ubuntu-latest bin/spc-gnu-docker
 linux aarch64 ubuntu-24.04-arm bin/spc-gnu-docker
+windows x86_64 windows-latest repackage
 EOF
-# WINDOWS TEMPORARILY DISABLED (do not re-add this row as-is). The `bundle` entry
-# shape breaks the daemon's php.json parser (crates/yerd-php/src/release.rs wants
-# cli+fpm on every entry), which empties the WHOLE installable-versions list —
-# macOS included. Windows must be re-introduced via a SEPARATE manifest
-# (php-windows.json), never merged into php.json/php-legacy.json — same pattern
-# as pcov's separate manifest. Until then, generate-manifest.php also drops any
-# carried-over windows entries so a clean run heals the poisoned live manifests.
+# §W — Windows differs on BOTH axes:
+#   BUILD:    it is not a static-php-cli build. repackage-windows.sh repackages the
+#             official windows.php.net NTS build into a directory BUNDLE (php.exe +
+#             php-cgi.exe + php8.dll + ext/*.dll + libpq/openssl DLLs + cacert.pem).
+#   MANIFEST: its `bundle` entry shape is INCOMPATIBLE with the daemon's cli/fpm
+#             php.json parser (crates/yerd-php/src/release.rs). A windows entry in
+#             php.json fails the strict deserialize and empties the WHOLE version
+#             list, macOS included. So windows entries go in a SEPARATE per-channel
+#             manifest (php-windows.json / php-windows-legacy.json), NEVER merged
+#             into php.json/php-legacy.json — the same isolation pcov uses. The
+#             existing daemon keeps reading unix-only php.json and cannot break; a
+#             daemon update reads php-windows.json when running on windows.
+# generate-manifest.php emits the two shapes into the two files (`--windows` flag).
 # §W — Windows is a DIFFERENT build model. spc builds a STATIC php on Windows,
 # which can neither load dynamic extensions (yerd-php-ext's yerd-dump.dll) nor
 # link libpq (pgsql). So — like Laravel Herd — the windows leg REPACKAGES the

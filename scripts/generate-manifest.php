@@ -68,6 +68,12 @@ $supported  = array_flip(preg_split('/\s+/', trim((string) $args['minors']), -1,
 $schema     = (int) ($args['schema'] ?? 1);
 $generated  = (string) ($args['generated-at'] ?? gmdate('Y-m-d\TH:i:s\Z'));
 
+// --windows => emit ONLY windows bundle entries (for php-windows.json); default
+// => emit ONLY unix cli/fpm entries (for php.json / php-legacy.json). The two
+// shapes never share a manifest (§W): a bundle entry in php.json breaks the
+// daemon's strict cli/fpm parser and empties the whole version list.
+$windowsOnly = isset($args['windows']);
+
 // index keyed by "minor|os|arch"
 $index = [];
 
@@ -77,14 +83,14 @@ if (!empty($args['old-manifest']) && is_file($args['old-manifest'])) {
     foreach ($old['builds'] ?? [] as $b) {
         if (!isset($b['minor'])) continue;
         if (!isset($supported[$b['minor']])) continue;   // drop out-of-range minors (§2)
-        if (($b['os'] ?? '') === 'windows') continue;    // TEMP: heal poisoned manifests — windows moves to a separate file
+        if ((($b['os'] ?? '') === 'windows') !== $windowsOnly) continue;   // this manifest's os class only (§W)
         $index["{$b['minor']}|{$b['os']}|{$b['arch']}"] = $b;
     }
 }
 
 // 2. overwrite/insert the entries we rebuilt this run (fresh bytes from disk).
 foreach ($built as $e) {
-    if (($e['os'] ?? '') === 'windows') continue;        // TEMP: windows is disabled (moves to a separate manifest)
+    if ((($e['os'] ?? '') === 'windows') !== $windowsOnly) continue;   // this manifest's os class only (§W)
     foreach (['minor', 'php', 'os', 'arch', 'revision'] as $k) if (!isset($e[$k])) fail("built entry missing $k");
     if (!isset($supported[$e['minor']])) fail("built entry for unsupported minor {$e['minor']}");
     $rev = (int) $e['revision'];

@@ -55,38 +55,38 @@ jobs:
           [ -n "$MINISIGN_SECRET_KEY" ] || { echo "FATAL: secret MINISIGN_SECRET_KEY is not set — run scripts/keygen.sh and configure it."; exit 1; }
           [ -n "$MINISIGN_PUBLIC_KEY" ] || { echo "FATAL: variable MINISIGN_PUBLIC_KEY is not set — the sign self-verify and §10.8 sanity-check require it."; exit 1; }
           echo "signing config present."
-      - name: Fetch previously-published manifest (§10.1)
+      - name: Fetch previously-published manifests (§10.1)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           source scripts/config.sh
-          # Distinguish three cases without ever defaulting a *fetch error* to
-          # empty (which would make resolve treat every target as new and RESET
-          # every revision to 1, wiping the auto-heal history, §7):
-          #   1. no rolling release at all      -> genuine first run, empty.
-          #   2. release exists but THIS channel's manifest is absent from its
-          #      asset list                      -> first run for this channel, empty.
-          #   3. manifest present                -> download it (fatal on failure).
-          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "No rolling '$RELEASE_TAG' release yet — first run, empty manifest."
-            echo '{}' > old-manifest.json
-          else
-            assets="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')" \
-              || { echo "FATAL: could not list release assets — aborting (a default-empty here would reset all revisions)."; exit 1; }
-            if ! grep -qxF "$MANIFEST_NAME" <<<"$assets"; then
-              echo "Release exists but $MANIFEST_NAME absent — first run for channel '$CHANNEL', empty manifest."
-              echo '{}' > old-manifest.json
-            else
-              gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-                --pattern "$MANIFEST_NAME" --output old-manifest.json --clobber \
-                || { echo "FATAL: $MANIFEST_NAME listed but could not be downloaded — aborting (a default-empty here would reset all revisions)."; exit 1; }
-              n="$(jq -r '(.builds // []) | length' old-manifest.json 2>/dev/null || echo x)"
-              case "$n" in
-                ''|x|0) echo "FATAL: fetched $MANIFEST_NAME is invalid or has no builds[] — refusing (would reset revisions)."; exit 1 ;;
-                *) echo "Previous manifest OK ($n builds)." ;;
-              esac
+          # This channel now publishes TWO manifests (unix + windows, §W), each
+          # carrying its own os class's revision history. Fetch both, never
+          # defaulting a *fetch error* to empty (which would reset revisions, §7).
+          # An absent manifest (no release, or that manifest not yet published) is
+          # a legitimate empty; present-but-unreadable/empty is fatal.
+          fetch_manifest() {   # <manifest-name> <out-file>
+            local name="$1" out="$2" assets n
+            if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "  no '$RELEASE_TAG' release yet — $name empty."; echo '{}' > "$out"; return
             fi
-          fi
+            assets="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')" \
+              || { echo "FATAL: could not list release assets — aborting (empty here would reset revisions)."; exit 1; }
+            if ! grep -qxF "$name" <<<"$assets"; then
+              echo "  $name absent — empty (first run for it)."; echo '{}' > "$out"; return
+            fi
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$name" --output "$out" --clobber \
+              || { echo "FATAL: $name listed but could not be downloaded — aborting."; exit 1; }
+            n="$(jq -r '(.builds // []) | length' "$out" 2>/dev/null || echo x)"
+            case "$n" in ''|x|0) echo "FATAL: fetched $name is invalid or has no builds[] — refusing (would reset revisions)."; exit 1 ;; *) echo "  $name OK ($n builds)." ;; esac
+          }
+          fetch_manifest "$MANIFEST_NAME"         old-unix.json
+          fetch_manifest "$WINDOWS_MANIFEST_NAME" old-win.json
+          # Merge both os classes for resolve's revision algorithm (it keys on
+          # minor/os/arch and ignores the cli/fpm/bundle shape). publish uses the
+          # two separate files for carry-over.
+          jq -s '{schema:1, builds: ((.[0].builds // []) + (.[1].builds // []))}' old-unix.json old-win.json > old-manifest.json
+          echo "merged $(jq '.builds | length' old-manifest.json) previous build(s) for resolve."
       - name: Resolve build matrix (§7 revision algorithm)
         id: resolve
         run: |
@@ -110,7 +110,8 @@ jobs:
           name: resolve-${{ inputs.channel }}
           path: |
             matrix.json
-            old-manifest.json
+            old-unix.json
+            old-win.json
             latest.json
 
   # ---------------------------------------------------------------------------
@@ -210,28 +211,38 @@ jobs:
           pattern: dist-${{ inputs.channel }}-*
           path: dist
           merge-multiple: true
-      - name: Generate ${{ inputs.channel }} manifest (§7)
+      - name: Generate ${{ inputs.channel }} manifests (§7 — unix + windows)
         run: |
           source scripts/config.sh
+          # Unix (macos/linux, cli+fpm) — carry over from the old unix manifest.
           php scripts/generate-manifest.php \
             --built=matrix.json --assets-dir=dist \
             --minors="$SUPPORTED_MINORS" \
-            --old-manifest=old-manifest.json > "$MANIFEST_NAME"
+            --old-manifest=old-unix.json > "$MANIFEST_NAME"
+          # Windows (bundle) — SEPARATE file (§W), carry over from the old windows manifest.
+          php scripts/generate-manifest.php \
+            --built=matrix.json --assets-dir=dist \
+            --minors="$SUPPORTED_MINORS" \
+            --old-manifest=old-win.json --windows > "$WINDOWS_MANIFEST_NAME"
           echo "::group::$MANIFEST_NAME"; cat "$MANIFEST_NAME"; echo "::endgroup::"
-      - name: Sign manifest (§6 — prehashed, dedicated key)
+          echo "::group::$WINDOWS_MANIFEST_NAME"; cat "$WINDOWS_MANIFEST_NAME"; echo "::endgroup::"
+      - name: Sign manifests (§6 — prehashed, dedicated key)
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
           MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
           MINISIGN_PUBLIC_KEY: ${{ vars.MINISIGN_PUBLIC_KEY }}
         run: |
           source scripts/config.sh
-          bash scripts/sign-manifest.sh "$MANIFEST_NAME" "$MANIFEST_SIG_NAME"
+          bash scripts/sign-manifest.sh "$MANIFEST_NAME"         "$MANIFEST_SIG_NAME"
+          bash scripts/sign-manifest.sh "$WINDOWS_MANIFEST_NAME" "$WINDOWS_MANIFEST_SIG_NAME"
       - name: Publish — prune LAST (§6)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           source scripts/config.sh
-          bash scripts/publish.sh dist "$MANIFEST_NAME" "$MANIFEST_SIG_NAME"
+          bash scripts/publish.sh dist \
+            "$MANIFEST_NAME" "$MANIFEST_SIG_NAME" \
+            "$WINDOWS_MANIFEST_NAME" "$WINDOWS_MANIFEST_SIG_NAME"
       - name: Post-publish sanity (§10.8)
         env:
           GH_TOKEN: ${{ github.token }}
