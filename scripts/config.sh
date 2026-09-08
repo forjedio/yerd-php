@@ -41,7 +41,7 @@ LEGACY_MINORS="7.4 8.0 8.1"
 # real modules load and will fail the build if they come back.
 # swoole-hook-mysql is different: it hooks mysqlnd + pdo_mysql and COEXISTS with
 # them (spc lists pdo_mysql as one of its ext-depends; no conflict), so it stays.
-STABLE_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,event,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,opentelemetry,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,swoole,swoole-hook-mysql,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
+STABLE_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,opentelemetry,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,swoole,swoole-hook-mysql,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
 
 # --- Extension set — legacy (EOL minors) --------------------------------------
 # STABLE_EXTENSIONS minus the extensions that don't build uniformly across
@@ -63,7 +63,7 @@ STABLE_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,event,exif,filein
 # would needlessly regress 8.0/8.1, so instead they are stripped PER MINOR for 7.4
 # only — see extensions_for_minor() below, which every build/verify step MUST go
 # through rather than reading $EXTENSIONS directly.
-LEGACY_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,event,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
+LEGACY_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
 
 # --- Windows extension set (repackage model, NOT spc) -------------------------
 # The Windows leg does NOT use static-php-cli (see the TARGETS note + §W below):
@@ -88,7 +88,7 @@ WINDOWS_PECL="igbinary:3.2.16 msgpack:3.0.1 redis:6.3.0 apcu:5.1.28"
 # IM_MOD_RL_*, FILTER_* DLLs) which must live next to php.exe, not in ext/ (the
 # Windows loader searches the exe dir for a loaded DLL's dependencies). That adds
 # ~60 MB to the bundle. Pin the version (re-verify on bump); blank to skip. Still
-# not covered (harder or absent Windows builds): imap, event, opentelemetry,
+# not covered (harder or absent Windows builds): imap, opentelemetry,
 # protobuf — addable on demand via the standard PECL-DLL-in-ext/ mechanism.
 WINDOWS_IMAGICK="3.8.1"
 

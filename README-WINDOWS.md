@@ -119,7 +119,7 @@ Three groups make up the extension set on Windows:
    which is why it has its own `WINDOWS_IMAGICK` version pin rather than riding in
    `WINDOWS_PECL`. Blank the pin to leave it out.
 
-Not bundled: imap, event, opentelemetry, and protobuf. imap was removed from PHP
+Not bundled: imap, opentelemetry, and protobuf. imap was removed from PHP
 core in 8.4 and its Windows build is awkward (the c-client dependency); the others
 are less common. Any of them can still be added by dropping the PECL NTS x64 DLL
 into `ext/` and adding an `extension=` line, which is the normal way to add an
@@ -225,6 +225,6 @@ These are known and intentionally left for later:
 - **Source integrity.** We fetch over HTTPS only. windows.php.net publishes
   sha256 sums, so we could verify the downloaded zip against them.
 
-- **PECL coverage.** redis, apcu, and imagick are in. imap, event, opentelemetry,
+- **PECL coverage.** redis, apcu, and imagick are in. imap, opentelemetry,
   and protobuf are not. A brand new minor may also lag on PECL Windows DLLs until
   upstream publishes them, which the best-effort step reports as a warning.
