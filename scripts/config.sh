@@ -192,9 +192,28 @@ extensions_for_minor() {
 # token | runner | spc wrapper. Runner labels copied from static-php-cli-hosted.
 # Consumed by resolve-builds.php; kept here so the target list has one home.
 # Format per line: "<os> <arch> <runner> <spc_wrapper>"
+# DISABLED — macos x86_64 (`macos x86_64 macos-15-intel bin/spc`). The
+# `Set up PHP (tooling on host)` step (shivammathur/setup-php@v2, php-version 8.4)
+# cannot install a host PHP on the macos-15-intel image: it sits silent for ~25
+# minutes and then fails with a bare "Could not setup PHP 8.4". The SAME step, same
+# action version, same input, succeeds on macos-15 (arm) in 38 SECONDS — so this is
+# the Intel runner image, not our config. Reproduced on four consecutive runs
+# (2026-09-07 scheduled, 2026-09-08 scheduled + rerun + dispatch) and never once on
+# arm. Not the old setup-php Intel bug (shivammathur/setup-php#1029, fixed in
+# 2.36.0; we resolve @v2 -> 2.37.2), and no matching upstream issue is filed.
+#
+# The host PHP only RUNS spc — it is unrelated to the PHP being built — so the fix
+# is a host-tooling one (install via brew, or pin a version with Intel bottles),
+# not a build change. Re-enable by uncommenting the line below once that is sorted.
+#
+# SAFE TO DISABLE: generate-manifest.php carries entries over from the previous
+# manifest filtered on MINOR and os-class only, never on TARGETS, so the published
+# macos/x86_64 entries (all four minors, revision 1) stay in php.json and keep
+# their tarballs referenced — publish.sh therefore does NOT prune them. Intel
+# installs keep working at the patch they already have; they just stop receiving
+# new patches/revisions (and so keep ext-event) until this is re-enabled.
 read -r -d '' TARGETS <<'EOF' || true
 macos aarch64 macos-15 bin/spc
-macos x86_64 macos-15-intel bin/spc
 linux x86_64 ubuntu-latest bin/spc-gnu-docker
 linux aarch64 ubuntu-24.04-arm bin/spc-gnu-docker
 windows x86_64 windows-latest repackage
