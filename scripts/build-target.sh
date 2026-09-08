@@ -57,6 +57,15 @@ cd "$SPC_DIR"
 # this.) Canonical setup step — must run before any bin/spc invocation.
 composer install --no-dev --no-interaction --optimize-autoloader
 
+# ALL CHANNELS — pin OpenLDAP to 2.6.14 in config/source.json BEFORE `spc download`
+# reads it. spc sources ldap as an unpinned `filelist`, so it rolled onto OpenLDAP
+# 2.7.0 the day upstream published it; 2.7.0's tls_o.c declares variables after a
+# case label, which gcc rejects under its default -std=gnu17 and which broke every
+# Linux leg. ldap can't be avoided by trimming EXTENSIONS — it's a lib-suggests of
+# both postgresql and krb5, and we build --with-suggested-libs. Fails loud if it
+# no-ops. See the script header for the full rationale.
+bash "$here/apply-ldap-pin-patch.sh" "$SPC_DIR"
+
 # LEGACY ONLY — two source-level pins applied to the fresh spc checkout BEFORE any
 # spc command reads its config. EOL minors need both; stable is unaffected and
 # left untouched. Each patch fails loud if it no-ops (an spc refactor must be

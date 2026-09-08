@@ -68,6 +68,7 @@ is `php -m` on a shipped binary, not the requested set.
 | `scripts/resolve-builds.php` | §7 | Decide what to build + each `revision` (reads previous manifest) |
 | `scripts/build-target.sh` | §4 | Clone pinned spc → patch → download → build → sign |
 | `scripts/apply-curl-patch.sh` | §3 | Force `ENABLE_ARES=OFF`; **fail if it no-ops** |
+| `scripts/apply-ldap-pin-patch.sh` | §3 | Pin OpenLDAP to 2.6.14 (2.7.0's `tls_o.c` breaks under gnu17); **fail if it no-ops** |
 | `scripts/apply-legacy-cflags-patch.sh` | legacy | Force `-std=gnu17` for EOL php-src (K&R libbcmath vs C23); **fail if it no-ops** |
 | `scripts/sign-macos.sh` | §4 | Ad-hoc sign both macOS binaries (mandatory on arm64) |
 | `scripts/verify-artifact.sh` | §5 | No-c-ares gate, `-m`/`-fpm -t`, real cross-repo ext load |
