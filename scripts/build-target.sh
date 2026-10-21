@@ -101,6 +101,12 @@ EXTS="$(extensions_for_minor "$MINOR")"
 # §3 — MUST run after download, before build. Fails the build if it no-ops.
 "$here/apply-curl-patch.sh" "$SPC_DIR"
 
+# ALL CHANNELS — PHP 8.4.27 / 8.5.12 ship a stray ext/imap/tests/ dir, which trips
+# spc's "imap is bundled (< 8.4), skip ext-imap" check and leaves no config.m4.
+# Only skip when config.m4 is really there. Fails the build if it no-ops; see
+# the script header for the full rationale.
+"$here/apply-imap-extract-patch.sh" "$SPC_DIR"
+
 # --with-suggested-libs still pulls libcares in (swoole needs it); harmless
 # because §3 forced ENABLE_ARES=OFF so curl never uses it.
 #
