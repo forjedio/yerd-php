@@ -178,9 +178,6 @@ if [ -n "${EXT_SO:-}" ] && [ -f "${EXT_SO}" ]; then
   so="$EXT_SO"
 elif command -v gh >/dev/null 2>&1; then
   # yerd-php-ext publishes per (minor, os, arch); try to fetch yerd-dump.so.
-  # NOTE: yerd-php-ext currently ships NO macos-x86_64 asset, so the Intel-mac
-  # leg always takes the ZEND_MODULE_API_NO fallback below (by design, until the
-  # ext adds Intel or yerd drops that target — §1 contingency).
   tmp="$(mktemp -d)"
   pat="yerd-dump-${MINOR}-${OS}-${ARCH}.so"
   if gh release download --repo "$EXT_REPO" --pattern "$pat" --dir "$tmp" 2>/dev/null; then

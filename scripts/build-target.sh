@@ -66,6 +66,12 @@ composer install --no-dev --no-interaction --optimize-autoloader
 # no-ops. See the script header for the full rationale.
 bash "$here/apply-ldap-pin-patch.sh" "$SPC_DIR"
 
+# ALL CHANNELS — pin swoole to v6.2.2 in config/source.json, same reason: spc
+# sources it as an unpinned `ghtar` ("v6\.+"), so it rolled onto 6.2.3, whose new
+# non-Linux futex fallback calls an undeclared sw_usleep() and broke every macOS
+# leg. Fails loud if it no-ops. See the script header for the full rationale.
+bash "$here/apply-swoole-pin-patch.sh" "$SPC_DIR"
+
 # LEGACY ONLY — two source-level pins applied to the fresh spc checkout BEFORE any
 # spc command reads its config. EOL minors need both; stable is unaffected and
 # left untouched. Each patch fails loud if it no-ops (an spc refactor must be
@@ -130,110 +136,7 @@ if [ "${CHANNEL:-stable}" = "legacy" ]; then
     build_args+=(--with-added-patch="$patch_base/$p")
   done
 fi
-# DIAGNOSTIC (remove with the scaffold below): keep the symbol table on the failing
-# macOS x86_64 target so a crash backtrace names the faulting MINIT function instead
-# of a stripped `.LL31` local. Scoped to this one target — it never ships (it fails);
-# arm64 still ships stripped.
-if [ "$OS" = "macos" ] && [ "$(uname -m)" = "x86_64" ]; then
-  build_args+=(--no-strip)
-fi
-# DIAGNOSTIC SCAFFOLD (remove once the macOS x86_64 startup crash is fixed) —
-# spc's own CLI sanity check runs `php -n -r 'echo "hello";'` but DISCARDS the
-# test binary's stderr, so a startup crash surfaces only as "code: N, output:"
-# with N the raw wait-status (6 == killed by SIGABRT). GitHub runners don't run
-# ReportCrash, so no .ips is written; instead get the faulting stack live via
-# lldb (Xcode is installed) and use DYLD_PRINT_INITIALIZERS to tell a load-time
-# global-constructor crash from a MINIT crash. Capture rc explicitly — `if ! cmd`
-# would zero $?.
-set +e
 "$CMD" "${build_args[@]}"
-rc=$?
-set -e
-if [ "$rc" -ne 0 ]; then
-  if [ "$OS" = "macos" ] && [ -x buildroot/bin/php ]; then
-    echo "======================================================================"
-    echo "spc build failed (rc=$rc) — diagnosing macOS startup crash"
-    echo "======================================================================"
-    set +e
-    echo "--- probe 1: plain run, stderr attached ---"
-    ./buildroot/bin/php -n -r 'echo "hello\n";'
-    echo ">>> exit: $?"
-    echo "--- probe 2: dyld initializers (LAST line before it stops = culprit lib if the"
-    echo "             crash is a load-time global constructor; if 'init-done' prints"
-    echo "             then it dies later, in PHP MINIT) ---"
-    DYLD_PRINT_INITIALIZERS=1 ./buildroot/bin/php -n -r 'echo "init-done\n";' 2>&1 | tail -60
-    echo "--- probe 3: post-mortem backtrace via core dump (no debugger-attach perms"
-    echo "             needed, which live lldb attach lacks on CI) ---"
-    sudo sysctl -w kern.coredump=1 >/dev/null 2>&1
-    # /cores is root:wheel 0755 by default; the kernel writes the core as the
-    # crashing process's uid, so make it writable or the core is silently dropped.
-    sudo mkdir -p /cores 2>/dev/null; sudo chmod 1777 /cores 2>/dev/null
-    rm -f /cores/core.* 2>/dev/null
-    ( ulimit -c unlimited; ./buildroot/bin/php -n -r 'echo "hi\n";' ) 2>&1
-    core="$(ls -t /cores/core.* 2>/dev/null | head -1)"
-    if [ -n "$core" ]; then
-      echo "core: $core ($(du -h "$core" | cut -f1))"
-      # --no-strip (set for this target above) keeps the symbol table in the binary,
-      # so frames resolve to real function names without a separate dSYM. Keep the
-      # command list minimal — lldb --batch aborts the whole session on the first
-      # command error, so no best-effort commands that might fail here.
-      xcrun lldb --batch -c "$core" buildroot/bin/php \
-        -o 'thread backtrace all' -o 'quit' 2>&1 | tail -120
-      # The backtrace shows zend_startup_module_ex(module=...) with debug info, so pull
-      # that extension's name straight from the core. Separate session so a frame/expr
-      # mismatch can't abort the backtrace above. frame #9 is zend_startup_module_ex in
-      # the observed trace; print its `module->name`.
-      echo "--- culprit module name (from core, frame 9 = zend_startup_module_ex) ---"
-      xcrun lldb --batch -c "$core" buildroot/bin/php \
-        -o 'frame select 9' -o 'expr -- module->name' -o 'quit' 2>&1 | tail -12
-      sudo rm -f "$core"
-    else
-      echo "(no core written; falling back to live lldb after enabling dev mode +"
-      echo " ad-hoc signing with get-task-allow so attach is permitted)"
-      sudo /usr/sbin/DevToolsSecurity -enable >/dev/null 2>&1
-      ent="$(mktemp -t gettaskallow).plist"
-      cat > "$ent" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>com.apple.security.get-task-allow</key><true/></dict></plist>
-PLIST
-      codesign -s - -f --entitlements "$ent" buildroot/bin/php >/dev/null 2>&1
-      xcrun lldb --batch -o 'run' -o 'thread backtrace all' -o 'quit' \
-        -- ./buildroot/bin/php -n -r 'echo "hi\n";' 2>&1 | tail -120
-    fi
-    echo "--- probe 4: name each extension as its MINIT starts; the LAST name printed"
-    echo "             before the abort is the extension whose MINIT overflows. This is"
-    echo "             symbol-resolution-proof (reads the arg), unlike the backtrace. ---"
-    # zend_startup_module_ex(zend_module_entry *module) — arg0 in %rdi (SysV). In the
-    # 7.4/8.x zend_module_entry the `const char *name` sits at offset 32 (size u16 @0,
-    # zend_api u32 @4, zend_debug/zts u8 @8/9, pad, ini_entry* @16, deps* @24, name @32).
-    # Break there, print the name, auto-continue; live debugging needs attach perms, so
-    # enable developer mode and ad-hoc-sign a copy with get-task-allow first.
-    sudo /usr/sbin/DevToolsSecurity -enable >/dev/null 2>&1
-    ent="$(mktemp -t gettaskallow).plist"
-    cat > "$ent" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>com.apple.security.get-task-allow</key><true/></dict></plist>
-PLIST
-    cp buildroot/bin/php buildroot/bin/php.dbg
-    codesign -s - -f --entitlements "$ent" buildroot/bin/php.dbg >/dev/null 2>&1
-    xcrun lldb --batch \
-      -o 'breakpoint set --name zend_startup_module_ex --skip-prologue false --auto-continue true' \
-      -o 'breakpoint command add --one-liner "expr -- *(char **)($rdi + 32)" 1' \
-      -o 'run' \
-      -o 'thread backtrace' \
-      -o 'quit' \
-      -- ./buildroot/bin/php.dbg -n -r 'echo "hi\n";' 2>&1 | grep -vE '^ *0x|Valid values|or "' | tail -60
-    rm -f buildroot/bin/php.dbg
-    echo "--- file / otool / codesign ---"
-    file buildroot/bin/php
-    otool -L buildroot/bin/php 2>&1 | head -50
-    codesign -dv buildroot/bin/php 2>&1 | head -20
-    set -e
-  fi
-  exit "$rc"
-fi
 
 for b in buildroot/bin/php buildroot/bin/php-fpm; do
   [ -f "$b" ] || { echo "FATAL: expected artifact $b missing after build"; exit 1; }
