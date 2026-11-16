@@ -21,8 +21,8 @@
 #     moment upstream published it — no SPC_REF bump, no commit here. Every Linux
 #     leg has failed since (the first build to actually run after 2026-08-06).
 #
-#     ldap is not directly requested: it arrives as a lib-suggests of BOTH
-#     postgresql (pdo_pgsql/pgsql) and krb5 (imap), and the build passes
+#     ldap is requested directly (the `ldap` extension, yerd#235) AND arrives as a
+#     lib-suggests of BOTH postgresql (pdo_pgsql/pgsql) and krb5 (imap) under
 #     --with-suggested-libs, so it cannot be dropped by trimming EXTENSIONS.
 #
 # Applied channel-wide: stable and legacy both build postgresql + krb5, and 2.6.14

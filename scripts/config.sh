@@ -41,7 +41,14 @@ LEGACY_MINORS="7.4 8.0 8.1"
 # real modules load and will fail the build if they come back.
 # swoole-hook-mysql is different: it hooks mysqlnd + pdo_mysql and COEXISTS with
 # them (spc lists pdo_mysql as one of its ext-depends; no conflict), so it stays.
-STABLE_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,opentelemetry,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,swoole,swoole-hook-mysql,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
+#
+# ldap is built in (yerd#235). OpenLDAP is ALREADY statically linked (a lib-suggests
+# of postgresql/krb5) and its symbols are exported from the binary, so a user-built
+# ldap.so registered as a custom extension ended up split across two libldap copies
+# and aborted on LDAP_VALID(ld) in ldap_create_page_control_value. Building the ext
+# in makes it use the one bundled copy, as Herd does. §5.6 of verify-artifact.sh
+# runs the issue's repro against every artifact.
+STABLE_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,ldap,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,opentelemetry,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,swoole,swoole-hook-mysql,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
 
 # --- Extension set — legacy (EOL minors) --------------------------------------
 # STABLE_EXTENSIONS minus the extensions that don't build uniformly across
@@ -55,6 +62,7 @@ STABLE_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,exif,fileinfo,fil
 # Everything else (incl. the real pdo_pgsql / pdo_sqlite modules the §5.5 gate
 # asserts) is kept. PROVISIONAL: the exact set can only be confirmed by the first
 # CI build — if spc rejects another ext on an EOL minor, trim it here.
+# ldap (yerd#235, see STABLE_EXTENSIONS) is likewise provisional on 7.4/8.0/8.1.
 #
 # opcache and protobuf are SPECIAL cases and stay in this list: spc hard-fails
 # BOTH on 7.4 because each needs PHP >= 8.0 ("Statically compiled PHP with Zend
@@ -63,7 +71,7 @@ STABLE_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,exif,fileinfo,fil
 # would needlessly regress 8.0/8.1, so instead they are stripped PER MINOR for 7.4
 # only — see extensions_for_minor() below, which every build/verify step MUST go
 # through rather than reading $EXTENSIONS directly.
-LEGACY_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
+LEGACY_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,ldap,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
 
 # --- Windows extension set (repackage model, NOT spc) -------------------------
 # The Windows leg does NOT use static-php-cli (see the TARGETS note + §W below):

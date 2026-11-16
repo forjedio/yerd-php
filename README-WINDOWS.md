@@ -97,8 +97,9 @@ Three groups make up the extension set on Windows:
 
 2. **Bundled `ext/*.dll`.** The official build ships 37 extension DLLs.
    `repackage-windows.sh` enables every one that appears in `STABLE_EXTENSIONS`
-   (24 of them, including curl, gd, intl, mbstring, openssl, sodium, pdo_mysql,
-   pdo_pgsql, pgsql, pdo_sqlite, sqlite3, zip, soap, and opcache). The list is
+   (25 of them, including curl, gd, intl, ldap, mbstring, openssl, sodium,
+   pdo_mysql, pdo_pgsql, pgsql, pdo_sqlite, sqlite3, zip, soap, and opcache;
+   ldap relies on the `libsasl.dll` the official build ships). The list is
    computed at build time by intersecting the yerd set with what the build
    actually ships, so there is no separate Windows extension list to keep in
    sync.
