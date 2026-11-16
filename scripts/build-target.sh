@@ -61,8 +61,9 @@ composer install --no-dev --no-interaction --optimize-autoloader
 # reads it. spc sources ldap as an unpinned `filelist`, so it rolled onto OpenLDAP
 # 2.7.0 the day upstream published it; 2.7.0's tls_o.c declares variables after a
 # case label, which gcc rejects under its default -std=gnu17 and which broke every
-# Linux leg. ldap can't be avoided by trimming EXTENSIONS — it's a lib-suggests of
-# both postgresql and krb5, and we build --with-suggested-libs. Fails loud if it
+# Linux leg. ldap can't be avoided by trimming EXTENSIONS — the `ldap` ext requests
+# it directly (yerd#235), and it's also a lib-suggests of both postgresql and krb5
+# under --with-suggested-libs. Fails loud if it
 # no-ops. See the script header for the full rationale.
 bash "$here/apply-ldap-pin-patch.sh" "$SPC_DIR"
 

@@ -14,6 +14,25 @@ PHP="${1:?php-bin}"; SECONDARY="${2-}"; MINOR="${3:?minor}"; OS="${4:?os}"; ARCH
 
 fail() { echo "VERIFY FAIL: $*" >&2; exit 1; }
 
+# §5.6 yerd#235 repro (used by both gates): setting a paged-results server control
+# aborted (SIGABRT, LDAP_VALID(ld) in ldap_create_page_control_value) when ldap.so
+# and the binary used different libldap copies. Needs no LDAP server — ldap_connect
+# with a URI does not connect. Valid on 7.4+ (array-form controls since 7.3).
+LDAP_REPRO='$l = ldap_connect("ldap://localhost"); var_export(ldap_set_option($l, LDAP_OPT_SERVER_CONTROLS, [["oid" => LDAP_CONTROL_PAGEDRESULTS, "iscritical" => false, "value" => ["size" => 500, "cookie" => ""]]]));'
+
+# ldap_repro <label> <cmd...> — run <cmd...> (a php invocation that executes
+# LDAP_REPRO, via -r or a script file) and require it to print exactly `true`.
+# Exit status is captured separately so a SIGABRT (134) reads as an abort, not
+# merely a wrong value. display_errors=stderr keeps any notice/deprecation off the
+# exact `true` match (the CLI SAPI defaults display_errors to STDOUT).
+ldap_repro() {
+  local label="$1" out rc=0; shift
+  out="$("$@" 2>/dev/null)" || rc=$?
+  echo "  $label ldap_set_option(PAGEDRESULTS) => ${out:-<none>} (exit $rc)"
+  [ "$rc" -eq 0 ] && [ "$out" = "true" ] \
+    || fail "yerd#235 repro failed in $label (exit $rc, got '$out', want true) — ldap split across two libldap copies?"
+}
+
 # --- Windows bundle gate (repackage model) ------------------------------------
 # The windows artifact is a DLL-based directory bundle (official NTS build), not
 # an spc static binary, so it has its own self-contained gate and returns before
@@ -54,12 +73,15 @@ if [ "$OS" = "windows" ]; then
   grep -iq "opcache" <<<"$mods" || fail "opcache missing from php -m"
   echo "  bulk-set + pgsql present."
   # PECL extensions are added best-effort; whichever DLLs landed in the bundle
-  # MUST actually load (a present-but-unloadable DLL is a packaging bug).
-  for pe in redis apcu igbinary msgpack imagick; do
+  # MUST actually load (a present-but-unloadable DLL is a packaging bug). ldap is
+  # an official bundled DLL, not PECL, but gets the same rule: startup errors are
+  # suppressed above, so a php_ldap.dll missing its libsasl.dll would otherwise
+  # fail silently.
+  for pe in redis apcu igbinary msgpack imagick ldap; do
     [ -f "$TREE/ext/php_${pe}.dll" ] || continue
-    grep -iqx "$pe" <<<"$mods" || fail "PECL extension '$pe' is in the bundle but did not load"
+    grep -iqx "$pe" <<<"$mods" || fail "extension '$pe' DLL is in the bundle but did not load"
   done
-  echo "  bundled PECL extensions load."
+  echo "  bundled PECL / optional extension DLLs load."
 
   echo "== §5.3 php-cgi.exe (FastCGI serving SAPI) =="
   "${C[@]}" -v 2>&1 | grep -iq "cgi-fcgi" || fail "php-cgi -v did not report cgi-fcgi"
@@ -93,6 +115,18 @@ if [ "$OS" = "windows" ]; then
   got="$("${P[@]}" -i | sed -n 's/^PHP API => \([0-9]\{8\}\).*/\1/p' | head -1)"
   echo "  ZEND_MODULE_API_NO got=$got want=$want"
   [ "$got" = "$want" ] || fail "ZEND_MODULE_API_NO mismatch (got '$got', want '$want')"
+
+  echo "== §5.6 LDAP_CONTROL_PAGEDRESULTS repro (yerd#235) =="
+  if [ -f "$TREE/ext/php_ldap.dll" ]; then
+    ldap_repro php.exe "${P[@]}" -d display_errors=stderr -r "$LDAP_REPRO"
+    # php-cgi has no -r: run the same snippet from a file, -q suppresses headers.
+    repro_dir="$(mktemp -d)"; repro="$repro_dir/yerd235.php"
+    printf '<?php %s' "$LDAP_REPRO" > "$repro"
+    ldap_repro php-cgi.exe "${C[@]}" -d display_errors=stderr -q "$repro"
+    rm -rf "$repro_dir"
+  else
+    echo "  php_ldap.dll not in this bundle — skipping."
+  fi
 
   echo "VERIFY OK (windows bundle): $MINOR $OS-$ARCH"
   exit 0
@@ -139,7 +173,7 @@ mods="$("$PHP" -m)"
 # Name mapping is not 1:1 with ext tokens, so we assert a critical, cleanly-named
 # subset — including the four the brief calls out explicitly (swoole,intl,opcache,curl).
 # Skip any that the active channel doesn't build (legacy drops swoole).
-for m in curl swoole intl mbstring openssl sodium gd pdo_mysql pgsql redis zip; do
+for m in curl swoole intl ldap mbstring openssl sodium gd pdo_mysql pgsql redis zip; do
   has_ext "$m" || continue
   grep -iqx "$m" <<<"$mods" || fail "module '$m' missing from php -m"
 done
@@ -268,6 +302,16 @@ if [ "$(printf '8.4\n%s\n' "$MINOR" | sort -V | head -1)" = "8.4" ]; then
   [ "$sub" = "ok" ] || fail "8.4+ PDO driver subclasses: $sub"
 else
   echo "  minor $MINOR < 8.4 — skipping Pdo\\Pgsql / Pdo\\Sqlite subclass check (not present pre-8.4)."
+fi
+
+echo "== §5.6 LDAP_CONTROL_PAGEDRESULTS repro (yerd#235) =="
+if has_ext ldap; then
+  # CLI module presence is asserted in §5.2.
+  ldap_repro php "$PHP" -d display_errors=stderr -r "$LDAP_REPRO"
+  grep -iqx "ldap" <<<"$fpmmods" || fail "module 'ldap' missing from php-fpm -m"
+  echo "  ldap present in php-fpm -m."
+else
+  echo "  ldap not in this minor's set — skipping."
 fi
 
 echo "VERIFY OK: $MINOR $OS-$ARCH"
