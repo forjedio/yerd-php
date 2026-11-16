@@ -120,3 +120,8 @@ CHANNEL=legacy bash -c 'source scripts/config.sh; echo "$SUPPORTED_MINORS -> $MA
 php  scripts/resolve-builds.php --latest=latest.json --targets=targets.json --minors="8.2 8.3 8.4 8.5"
 php  scripts/generate-manifest.php --built=matrix.json --assets-dir=dist --minors="7.4 8.0 8.1"
 ```
+
+## License
+
+The build scripts and tooling in this repository are licensed under the [MIT License](LICENSE.md), the same as [yerd](https://github.com/forjedio/yerd).
+The PHP binaries built here remain under the PHP License and the licenses of the bundled extensions and libraries.
