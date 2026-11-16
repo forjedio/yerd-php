@@ -348,4 +348,25 @@ if [ "$OS" = "linux" ]; then
   echo "  archive symbols hidden; PHP API exported."
 fi
 
+echo "== §5.9 OPcache JIT not disabled by swoole (yerd-php#4) =="
+# Swoole's stdext installs user opcode handlers, which makes OPcache refuse the
+# JIT. apply-swoole-stdext-patch.sh builds without it; this gate catches any
+# regression (spc/swoole bump, or another ext adding handlers). Legacy is skipped
+# (no swoole; and 8.0's JIT has no arm64 backend).
+if has_ext swoole && has_ext opcache; then
+  jit=(-d opcache.enable=1 -d opcache.jit_buffer_size=64M -d opcache.jit=tracing)
+  out="$("$PHP" "${jit[@]}" -d opcache.enable_cli=1 -d display_startup_errors=1 -r '
+    $j = opcache_get_status(false)["jit"] ?? [];
+    echo (!empty($j["enabled"]) && !empty($j["on"])) ? "ok" : ("FAIL: " . json_encode($j));
+  ' 2>&1 || true)"
+  echo "  CLI JIT => $out"
+  grep -qx "ok" <<<"$out" || fail "OPcache JIT disabled in CLI (got '$out') — swoole stdext back on, or another ext installs user opcode handlers?"
+  fout="$("$FPM" "${jit[@]}" -i 2>&1 || true)"
+  echo "  FPM $(grep -m1 '^JIT => ' <<<"$fout" || echo 'JIT => <missing>')"
+  grep -qx 'JIT => On' <<<"$fout" || fail "OPcache JIT not On in php-fpm -i — swoole stdext back on, or another ext installs user opcode handlers?"
+  ! grep -q 'JIT disabled' <<<"$fout" || fail "php-fpm printed a 'JIT disabled' warning"
+else
+  echo "  swoole/opcache not in this minor's set — skipping."
+fi
+
 echo "VERIFY OK: $MINOR $OS-$ARCH"

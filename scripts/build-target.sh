@@ -73,6 +73,12 @@ bash "$here/apply-ldap-pin-patch.sh" "$SPC_DIR"
 # leg. Fails loud if it no-ops. See the script header for the full rationale.
 bash "$here/apply-swoole-pin-patch.sh" "$SPC_DIR"
 
+# ALL CHANNELS — build swoole with --disable-swoole-stdext (spc passes --enable-
+# for swoole >= 6.1). stdext installs user opcode handlers at MINIT, which makes
+# OPcache disable the JIT (yerd-php#4). No-op on legacy (no swoole). Fails loud
+# if it no-ops. See the script header for the full rationale.
+bash "$here/apply-swoole-stdext-patch.sh" "$SPC_DIR"
+
 # LEGACY ONLY — two source-level pins applied to the fresh spc checkout BEFORE any
 # spc command reads its config. EOL minors need both; stable is unaffected and
 # left untouched. Each patch fails loud if it no-ops (an spc refactor must be
