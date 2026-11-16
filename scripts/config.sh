@@ -48,7 +48,10 @@ LEGACY_MINORS="7.4 8.0 8.1"
 # and aborted on LDAP_VALID(ld) in ldap_create_page_control_value. Building the ext
 # in makes it use the one bundled copy, as Herd does. §5.6 of verify-artifact.sh
 # runs the issue's repro against every artifact.
-STABLE_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,ldap,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,opentelemetry,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,swoole,swoole-hook-mysql,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
+#
+# ffi (stable only, yerd#252): for php-vips/libvips. Native libs are NOT bundled, and
+# FPM needs ffi.enable=true from the daemon (default "preload" allows CLI only).
+STABLE_EXTENSIONS="apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,exif,ffi,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,ldap,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,opentelemetry,pcntl,pdo,pdo_mysql,pdo_pgsql,pdo_sqlite,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,swoole,swoole-hook-mysql,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib"
 
 # --- Extension set — legacy (EOL minors) --------------------------------------
 # STABLE_EXTENSIONS minus the extensions that don't build uniformly across

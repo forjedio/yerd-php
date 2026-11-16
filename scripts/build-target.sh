@@ -149,6 +149,13 @@ if [ "${CHANNEL:-stable}" = "legacy" ]; then
     build_args+=(--with-added-patch="$patch_base/$p")
   done
 fi
+# ALL CHANNELS, Linux only — link php/php-fpm with -Wl,--exclude-libs,ALL so libs
+# dlopened via FFI (libvips) don't bind to PHP's static libpng/libxml2/... copies.
+# Fires at before-php-make; see the script header. /app/config = docker mount.
+if [ "$OS" = "linux" ]; then
+  cp "$here/spc-patch-linux-exclude-libs.php" "$SPC_DIR/config/spc-patch-linux-exclude-libs.php"
+  build_args+=(--with-added-patch="/app/config/spc-patch-linux-exclude-libs.php")
+fi
 "$CMD" "${build_args[@]}"
 
 for b in buildroot/bin/php buildroot/bin/php-fpm; do

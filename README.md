@@ -58,6 +58,16 @@ and is unaffected). The `legacy` extension set otherwise stays provisional until
 the first CI build confirms what spc accepts on EOL PHP — the authoritative list
 is `php -m` on a shipped binary, not the requested set.
 
+## FFI
+
+The `stable` channel includes FFI on every target, so FFI-based libraries such as
+php-vips (libvips) work (yerd#252). Legacy Unix builds do not include it; legacy
+Windows bundles do, because they get the full set. Native libraries are **not**
+bundled. Install libvips from the system: `brew install vips` on macOS, or
+`libvips42` on Linux (`libvips42t64` on Ubuntu 24.04). `ffi.enable` defaults to
+`preload`, which allows FFI from the CLI only. Serving FFI code through FPM or
+php-cgi needs `ffi.enable=true`, which is a yerd daemon follow-up.
+
 ## Scripts (each maps to a brief section)
 
 | Script | Brief | Role |

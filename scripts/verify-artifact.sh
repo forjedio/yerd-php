@@ -67,7 +67,7 @@ if [ "$OS" = "windows" ]; then
   echo "== §5.2 php -v / php -m (bulk set + pgsql present) =="
   "${P[@]}" -v >/dev/null || fail "php -v did not run"
   mods="$("${P[@]}" -m)"
-  for m in curl intl mbstring openssl sodium gd pdo_mysql pgsql pdo_pgsql pdo_sqlite sqlite3 zip soap; do
+  for m in curl intl mbstring openssl sodium gd pdo_mysql pgsql pdo_pgsql pdo_sqlite sqlite3 zip soap ffi; do
     grep -iqx "$m" <<<"$mods" || fail "module '$m' missing from php -m"
   done
   grep -iq "opcache" <<<"$mods" || fail "opcache missing from php -m"
@@ -128,6 +128,15 @@ if [ "$OS" = "windows" ]; then
     echo "  php_ldap.dll not in this bundle — skipping."
   fi
 
+  echo "== §5.7 FFI (CLI) =="
+  # Proves libffi + LoadLibrary work end to end (php-vips/libvips, yerd#252). The
+  # library is named explicitly: Windows has no RTLD_DEFAULT-style global lookup,
+  # so a lib-less cdef can't resolve abs. Runs under the default ffi.enable=preload,
+  # which permits CLI; serving via php-cgi needs ffi.enable=true from the daemon.
+  ffi="$("${P[@]}" -r 'try { $r = FFI::cdef("int abs(int);", "ucrtbase.dll")->abs(-5); echo $r === 5 ? "ok" : "FAIL: abs(-5) => ".var_export($r,true); } catch (\Throwable $e) { echo "FAIL: ".get_class($e).": ".$e->getMessage(); }' 2>/dev/null || true)"
+  echo "  FFI::cdef(abs)->abs(-5) => $ffi"
+  [ "$ffi" = "ok" ] || fail "FFI functional check: $ffi"
+
   echo "VERIFY OK (windows bundle): $MINOR $OS-$ARCH"
   exit 0
 fi
@@ -173,7 +182,7 @@ mods="$("$PHP" -m)"
 # Name mapping is not 1:1 with ext tokens, so we assert a critical, cleanly-named
 # subset — including the four the brief calls out explicitly (swoole,intl,opcache,curl).
 # Skip any that the active channel doesn't build (legacy drops swoole).
-for m in curl swoole intl ldap mbstring openssl sodium gd pdo_mysql pgsql redis zip; do
+for m in curl swoole intl ldap mbstring openssl sodium gd pdo_mysql pgsql redis zip ffi; do
   has_ext "$m" || continue
   grep -iqx "$m" <<<"$mods" || fail "module '$m' missing from php -m"
 done
@@ -285,6 +294,7 @@ for m in pdo_pgsql pdo_sqlite; do
   grep -iqx "$m" <<<"$fpmmods" || fail "module '$m' missing from php-fpm -m"
 done
 has_ext swoole && { grep -iqx "swoole" <<<"$fpmmods" || fail "module 'swoole' missing from php-fpm -m"; }
+has_ext ffi && { grep -iqx "ffi" <<<"$fpmmods" || fail "module 'FFI' missing from php-fpm -m"; }
 echo "  pdo_pgsql / pdo_sqlite present in both php -m and php-fpm -m."
 
 # Driver-specific PDO subclasses (Pdo\Pgsql, Pdo\Sqlite) landed in 8.4 via the
@@ -314,7 +324,31 @@ else
   echo "  ldap not in this minor's set — skipping."
 fi
 
-echo "== §5.7 OPcache JIT not disabled by swoole (yerd-php#4) =="
+if has_ext ffi; then
+  echo "== §5.7 FFI (CLI) =="
+  # Proves libffi + dlopen work end to end (php-vips/libvips, yerd#252). A lib-less
+  # cdef resolves abs via RTLD_DEFAULT from the dynamically linked libc/libSystem.
+  # Runs under the default ffi.enable=preload, which permits CLI; FPM needs the
+  # daemon's ffi.enable=true, so no functional FPM call is made here.
+  ffi="$("$PHP" -r 'try { $r = FFI::cdef("int abs(int);")->abs(-5); echo $r === 5 ? "ok" : "FAIL: abs(-5) => ".var_export($r,true); } catch (\Throwable $e) { echo "FAIL: ".get_class($e).": ".$e->getMessage(); }' 2>/dev/null || true)"
+  echo "  FFI::cdef(abs)->abs(-5) => $ffi"
+  [ "$ffi" = "ok" ] || fail "FFI functional check: $ffi"
+fi
+
+if [ "$OS" = "linux" ]; then
+  echo "== §5.8 static-archive symbols hidden (Linux) =="
+  # spc-patch-linux-exclude-libs.php links with -Wl,--exclude-libs,ALL so a library
+  # dlopened via FFI (libvips) binds to its own system libpng/libxml2, not PHP's
+  # static copies. Sample archive symbols must be gone; the PHP API must remain.
+  dyn="$(nm -D --defined-only "$PHP" | awk '{print $3}')"
+  if grep -qxE 'png_create_read_struct|xmlReadMemory' <<<"$dyn"; then
+    fail "static-archive symbols exported from php (spc-patch-linux-exclude-libs lost?)"
+  fi
+  grep -qx zend_parse_parameters <<<"$dyn" || fail "PHP API (zend_parse_parameters) no longer exported"
+  echo "  archive symbols hidden; PHP API exported."
+fi
+
+echo "== §5.9 OPcache JIT not disabled by swoole (yerd-php#4) =="
 # Swoole's stdext installs user opcode handlers, which makes OPcache refuse the
 # JIT. apply-swoole-stdext-patch.sh builds without it; this gate catches any
 # regression (spc/swoole bump, or another ext adding handlers). Legacy is skipped
