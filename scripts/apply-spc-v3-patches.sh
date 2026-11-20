@@ -176,12 +176,27 @@ fi
 
 # 5. SAPI executable link flags, per OS section of env.ini (only that section's
 # SPC_CMD_VAR_PHP_MAKE_EXTRA_LDFLAGS line is touched):
-#   linux: --exclude-libs,ALL (yerd#252) + --export-dynamic (PHP API for .so exts)
+#   linux: --export-dynamic (PHP API for .so exts). Static-archive symbols are
+#          hidden (yerd#252) NOT by a linker flag — v3 links Linux with zig, which
+#          REJECTS --exclude-libs ("unsupported linker arg", fails configure) and
+#          silently DROPS --version-script for executables — but by setting every
+#          archive symbol to hidden visibility with llvm-objcopy at php's buildconf
+#          stage, after all libs are built (spc-v3-linux-hide-archive-syms.php).
 #   macos: -export_dynamic (PHP API for .so exts; ld64 has no --exclude-libs)
 if [ "$OS" = "linux" ]; then
-  patch_file "linux -Wl,--exclude-libs,ALL -Wl,--export-dynamic" config/env.ini \
-    's/(\[linux\](?:(?!\n\[).)*?\nSPC_CMD_VAR_PHP_MAKE_EXTRA_LDFLAGS=)""/$1"-Wl,--exclude-libs,ALL -Wl,--export-dynamic"/s' \
-    'SPC_CMD_VAR_PHP_MAKE_EXTRA_LDFLAGS="-Wl,--exclude-libs,ALL -Wl,--export-dynamic"'
+  patch_file "linux -Wl,--export-dynamic" config/env.ini \
+    's/(\[linux\](?:(?!\n\[).)*?\nSPC_CMD_VAR_PHP_MAKE_EXTRA_LDFLAGS=)""/$1"-Wl,--export-dynamic"/s' \
+    'SPC_CMD_VAR_PHP_MAKE_EXTRA_LDFLAGS="-Wl,--export-dynamic"'
+  cp "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/spc-v3-linux-hide-archive-syms.php" "$SPC_DIR/config/yerd/linux-hide-archive-syms.php"
+  patch_literal "linux archive-symbol hiding hook" src/Package/Target/php/unix.php \
+    "        yerd_php86_compat(SOURCE_PATH . '/php-src', php::getPHPVersionID());
+" \
+    "        yerd_php86_compat(SOURCE_PATH . '/php-src', php::getPHPVersionID());
+
+        // yerd-php: hide static-archive symbols on Linux (apply-spc-v3-patches.sh #5)
+        require_once dirname(__DIR__, 4) . '/config/yerd/linux-hide-archive-syms.php';
+        yerd_linux_hide_archive_syms(BUILD_LIB_PATH);
+"
 else
   patch_file "macos -Wl,-export_dynamic" config/env.ini \
     's/(\[macos\](?:(?!\n\[).)*?\nSPC_CMD_VAR_PHP_MAKE_EXTRA_LDFLAGS=)""/$1"-Wl,-export_dynamic"/s' \

@@ -55,6 +55,14 @@ generation; every other script is channel-agnostic.
 so it is pinned by commit SHA (`SPC_REF_V3`). Its patches all live in
 `apply-spc-v3-patches.sh`. On Linux, v3 targets glibc 2.17 through its zig
 toolchain (`SPC_TARGET=<arch>-linux-gnu.2.17`), not the 2.x gnu-docker container.
+zig drives the link, which changes two Linux details:
+- **yerd#252 symbol hiding.** zig rejects `-Wl,--exclude-libs` and silently ignores
+  `--version-script` for executables. So `spc-v3-linux-hide-archive-syms.php`
+  sets every symbol in `buildroot/lib/*.a` to hidden with `llvm-objcopy` (LLVM >= 18,
+  which `build-target.sh` installs if missing) before PHP links. §5.8 checks the result.
+- **glibc 2.17 floor.** zig's headers declare newer glibc functions, so configure can
+  detect functions the 2.17 target lacks. PHP 8.6's `epoll_pwait2` is forced off
+  through `SPC_EXTRA_PHP_VARS`.
 `legacy` stays on **2.8.5** (`SPC_REF_V2`), because v3 dropped PHP 7.4 and 8.0.
 
 **PHP 8.6 exceptions.** 8.6 arrived before the PECL ecosystem caught up, so for
@@ -98,6 +106,7 @@ php-cgi needs `ffi.enable=true`, which is a yerd daemon follow-up.
 | `scripts/resolve-builds.php` | §7 | Decide what to build + each `revision` (reads previous manifest) |
 | `scripts/build-target.sh` | §4 | Clone pinned spc → patch → download → build → sign (v3 for stable, v2 for legacy) |
 | `scripts/apply-spc-v3-patches.sh` | §3 | **stable / spc v3**: curl `ENABLE_ARES=OFF`, swoole stdext off, ldap + swoole pins, Linux `--exclude-libs`; **fail if any no-ops** |
+| `scripts/spc-v3-linux-hide-archive-syms.php` | yerd#252 | **stable / Linux**: set static-archive symbols hidden (llvm-objcopy) so FFI libs bind to their own copies |
 | `scripts/spc-v3-php86-compat.php` | 8.6 | Restore aliases removed in PHP 8.6 + apcu `php_verror` fix for static PECL builds (hooked in by the v3 patch script) |
 | `scripts/apply-curl-patch.sh` | §3 | **legacy / spc v2**: force `ENABLE_ARES=OFF`; **fail if it no-ops** |
 | `scripts/apply-ldap-pin-patch.sh` | §3 | **legacy / spc v2**: pin OpenLDAP to 2.6.14 (2.7.0's `tls_o.c` breaks under gnu17); **fail if it no-ops** |

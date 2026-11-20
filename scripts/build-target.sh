@@ -78,6 +78,22 @@ if [ "$SPC_GEN" = "3" ]; then
       *) echo "FATAL: unsupported linux arch $(uname -m)"; exit 1 ;;
     esac
     export SPC_TARGET
+    # glibc 2.17 has no epoll_pwait2 (glibc >= 2.35), but PHP 8.6's new
+    # main/poll/poll_backend_epoll.c uses it when HAVE_EPOLL_PWAIT2. configure's
+    # link probe correctly fails, then falls back to a DECLARATION check, which
+    # passes because zig's multi-version glibc headers declare it regardless of
+    # the target version -> "ld.lld: undefined symbol: epoll_pwait2" at the final
+    # link. Force both cache vars off. SPC_EXTRA_PHP_VARS is passed to php's
+    # configure (v3 unix.php; ZigToolchain prepends its avx512 vars to ours).
+    # No-op before 8.6 (no such check).
+    export SPC_EXTRA_PHP_VARS="ac_cv_func_epoll_pwait2=no ac_cv_have_decl_epoll_pwait2=no${SPC_EXTRA_PHP_VARS:+ $SPC_EXTRA_PHP_VARS}"
+    # llvm-objcopy >= 18 (--set-symbols-visibility) for the yerd#252 archive-symbol
+    # hiding — see spc-v3-linux-hide-archive-syms.php. zig's own objcopy can't
+    # change visibility. Ubuntu 24.04 / Debian 13 `llvm` is 18 / 19.
+    if ! command -v llvm-objcopy >/dev/null 2>&1 && ! ls /usr/bin/llvm-objcopy-* >/dev/null 2>&1; then
+      SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
+      $SUDO apt-get update -qq && DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq llvm
+    fi
   fi
 
   # v3 SYMLINKS ext sources into php-src/ext (ext/apcu -> source/ext-apcu) and
