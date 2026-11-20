@@ -87,12 +87,24 @@ if [ "$SPC_GEN" = "3" ]; then
     # configure (v3 unix.php; ZigToolchain prepends its avx512 vars to ours).
     # No-op before 8.6 (no such check).
     export SPC_EXTRA_PHP_VARS="ac_cv_func_epoll_pwait2=no ac_cv_have_decl_epoll_pwait2=no${SPC_EXTRA_PHP_VARS:+ $SPC_EXTRA_PHP_VARS}"
-    # llvm-objcopy >= 18 (--set-symbols-visibility) for the yerd#252 archive-symbol
-    # hiding — see spc-v3-linux-hide-archive-syms.php. zig's own objcopy can't
-    # change visibility. Ubuntu 24.04 / Debian 13 `llvm` is 18 / 19.
-    if ! command -v llvm-objcopy >/dev/null 2>&1 && ! ls /usr/bin/llvm-objcopy-* >/dev/null 2>&1; then
+    # llvm-objcopy with --set-symbols-visibility (LLVM >= 19) for the yerd#252
+    # archive-symbol hiding — see spc-v3-linux-hide-archive-syms.php. zig's own
+    # objcopy can't change visibility. Check the CAPABILITY, not mere presence:
+    # the ubuntu-24.04-arm runner ships llvm-objcopy-16/17/18, none of which has
+    # it (x86 ubuntu-latest happens to ship 22). Ubuntu 24.04's default `llvm` is
+    # 18, so install the versioned llvm-19 (in the noble archive).
+    objcopy_can_hide() {
+      local c
+      for c in llvm-objcopy /usr/bin/llvm-objcopy-*; do
+        command -v "$c" >/dev/null 2>&1 || continue
+        "$c" --help 2>/dev/null | grep -q -- '--set-symbols-visibility' && return 0
+      done
+      return 1
+    }
+    if ! objcopy_can_hide; then
       SUDO=""; [ "$(id -u)" -ne 0 ] && SUDO="sudo"
-      $SUDO apt-get update -qq && DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq llvm
+      $SUDO apt-get update -qq && DEBIAN_FRONTEND=noninteractive $SUDO apt-get install -y -qq llvm-19
+      objcopy_can_hide || { echo "FATAL: no llvm-objcopy with --set-symbols-visibility even after installing llvm-19"; exit 1; }
     fi
   fi
 

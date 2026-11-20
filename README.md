@@ -58,7 +58,7 @@ toolchain (`SPC_TARGET=<arch>-linux-gnu.2.17`), not the 2.x gnu-docker container
 zig drives the link, which changes two Linux details:
 - **yerd#252 symbol hiding.** zig rejects `-Wl,--exclude-libs` and silently ignores
   `--version-script` for executables. So `spc-v3-linux-hide-archive-syms.php`
-  sets every symbol in `buildroot/lib/*.a` to hidden with `llvm-objcopy` (LLVM >= 18,
+  sets every symbol in `buildroot/lib/*.a` to hidden with `llvm-objcopy` (LLVM >= 19,
   which `build-target.sh` installs if missing) before PHP links. §5.8 checks the result.
 - **glibc 2.17 floor.** zig's headers declare newer glibc functions, so configure can
   detect functions the 2.17 target lacks. PHP 8.6's `epoll_pwait2` is forced off

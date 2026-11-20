@@ -18,7 +18,7 @@
  * exported, while a library dlopened via FFI (libvips) binds to its own system
  * libpng/libxml2 instead of PHP's static copies.
  *
- * Needs llvm-objcopy >= 18 (build-target.sh installs `llvm` if absent). §5.8 of
+ * Needs llvm-objcopy >= 19 (build-target.sh installs llvm-19 if absent). §5.8 of
  * verify-artifact.sh is the end-to-end proof. Fails loud (throws) rather than
  * ever shipping an unhidden binary. Idempotent (re-hiding hidden is a no-op).
  */
@@ -43,7 +43,7 @@ function yerd_find_llvm_objcopy(): string
             return $c;
         }
     }
-    throw new \RuntimeException('yerd hide-archive-syms: no llvm-objcopy with --set-symbols-visibility (need LLVM >= 18; tried: ' . implode(', ', $candidates) . ')');
+    throw new \RuntimeException('yerd hide-archive-syms: no llvm-objcopy with --set-symbols-visibility (need LLVM >= 19; tried: ' . implode(', ', $candidates) . ')');
 }
 
 /** @return string[] global symbols defined in the archive */
