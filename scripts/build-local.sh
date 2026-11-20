@@ -51,8 +51,12 @@ if [ "$OS" = windows ]; then
   TREE="$WIN_OUT/php"
   BIN="$TREE/php.exe"; SAPI2="$TREE/php-cgi.exe"; PKG_DIR="$TREE"
 else
-  SPC_DIR="${SPC_DIR:-$PWD/static-php-cli}"; export SPC_DIR
-  echo "== [1/3] build $MINOR $OS-$ARCH (static-php-cli) =="
+  # One local checkout per spc generation (stable = v3, legacy = v2): their
+  # downloads/ caches and lock files are not compatible, and a v2 lock left in a
+  # shared dir makes it rebuild a stale php-src. CI always starts fresh.
+  if [ "$SPC_GEN" = "3" ]; then SPC_DIR="${SPC_DIR:-$PWD/static-php-cli-v3}"; else SPC_DIR="${SPC_DIR:-$PWD/static-php-cli}"; fi
+  export SPC_DIR
+  echo "== [1/3] build $MINOR $OS-$ARCH (static-php-cli v$SPC_GEN, $CHANNEL) =="
   bash "$here/build-target.sh" "$MINOR" "$OS"
   BIN="$SPC_DIR/buildroot/bin/php"; SAPI2="$SPC_DIR/buildroot/bin/php-fpm"; PKG_DIR="$SPC_DIR/buildroot/bin"
   [ -f "$BIN" ] || { echo "FATAL: build produced no $BIN"; exit 1; }

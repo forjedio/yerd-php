@@ -41,14 +41,21 @@ Two channels publish into the **same** rolling release (tag `php`), each with
 its own signed manifest, so `yerdd` can offer (or hide) the EOL tier
 independently:
 
-| Channel | Minors | Manifest | Extensions | ext partner |
-|---|---|---|---|---|
-| `stable` | 8.2 – 8.6 | `php.json` | full set | yerd-dump / pcov |
-| `legacy` | 7.4 / 8.0 / 8.1 | `php-legacy.json` | trimmed (no `opentelemetry`, no `swoole`) | none (EOL) |
+| Channel | Minors | Manifest | Extensions | ext partner | static-php-cli |
+|---|---|---|---|---|---|
+| `stable` | 8.2 – 8.6 | `php.json` | full set | yerd-dump / pcov | v3 (pinned SHA) |
+| `legacy` | 7.4 / 8.0 / 8.1 | `php-legacy.json` | trimmed (no `opentelemetry`, no `swoole`) | none (EOL) | 2.8.5 |
 
 The channel is a single switch in `scripts/config.sh` (`CHANNEL=stable|legacy`)
-that swaps the minors, extension set, and manifest name; every other script is
-channel-agnostic. `publish.sh` prunes against the **union** of both manifests so
+that swaps the minors, extension set, manifest name, and static-php-cli
+generation; every other script is channel-agnostic.
+
+**Two static-php-cli generations.** `stable` builds with spc **v3** (the
+"StaticPHP" rewrite), the only spc line that supports PHP 8.6. v3 has no tags yet,
+so it is pinned by commit SHA (`SPC_REF_V3`). Its patches all live in
+`apply-spc-v3-patches.sh`. On Linux, v3 targets glibc 2.17 through its zig
+toolchain (`SPC_TARGET=<arch>-linux-gnu.2.17`), not the 2.x gnu-docker container.
+`legacy` stays on **2.8.5** (`SPC_REF_V2`), because v3 dropped PHP 7.4 and 8.0. `publish.sh` prunes against the **union** of both manifests so
 one channel never deletes the other's tarballs.
 
 Legacy also runs one extra build step: `apply-legacy-cflags-patch.sh` forces
@@ -76,9 +83,10 @@ php-cgi needs `ffi.enable=true`, which is a yerd daemon follow-up.
 | `scripts/latest-patches.sh` | §9 | Latest upstream patch per minor (php.net) |
 | `scripts/targets-json.sh` | §1 | Target table → JSON |
 | `scripts/resolve-builds.php` | §7 | Decide what to build + each `revision` (reads previous manifest) |
-| `scripts/build-target.sh` | §4 | Clone pinned spc → patch → download → build → sign |
-| `scripts/apply-curl-patch.sh` | §3 | Force `ENABLE_ARES=OFF`; **fail if it no-ops** |
-| `scripts/apply-ldap-pin-patch.sh` | §3 | Pin OpenLDAP to 2.6.14 (2.7.0's `tls_o.c` breaks under gnu17); **fail if it no-ops** |
+| `scripts/build-target.sh` | §4 | Clone pinned spc → patch → download → build → sign (v3 for stable, v2 for legacy) |
+| `scripts/apply-spc-v3-patches.sh` | §3 | **stable / spc v3**: curl `ENABLE_ARES=OFF`, swoole stdext off, ldap + swoole pins, Linux `--exclude-libs`; **fail if any no-ops** |
+| `scripts/apply-curl-patch.sh` | §3 | **legacy / spc v2**: force `ENABLE_ARES=OFF`; **fail if it no-ops** |
+| `scripts/apply-ldap-pin-patch.sh` | §3 | **legacy / spc v2**: pin OpenLDAP to 2.6.14 (2.7.0's `tls_o.c` breaks under gnu17); **fail if it no-ops** |
 | `scripts/apply-legacy-cflags-patch.sh` | legacy | Force `-std=gnu17` for EOL php-src (K&R libbcmath vs C23); **fail if it no-ops** |
 | `scripts/sign-macos.sh` | §4 | Ad-hoc sign both macOS binaries (mandatory on arm64) |
 | `scripts/verify-artifact.sh` | §5 | No-c-ares gate, `-m`/`-fpm -t`, real cross-repo ext load |
@@ -115,9 +123,10 @@ The rolling release (tag `php`) is created automatically on the first publish.
 - **Target one channel** → `workflow_dispatch` with `channel: legacy` (or
   `stable`). Default `both` (scheduled runs always do both). `only_minor` applies
   within the chosen channel(s), e.g. `channel: legacy`, `only_minor: 8.1`.
-- **Bump static-php-cli** → change `SPC_REF` in `config.sh` and **re-verify the
-  §3 curl.php patch still matches** (it's under upstream refactor). The build
-  fails loudly if the patch no-ops.
+- **Bump static-php-cli** → change `SPC_REF_V3` (stable) or `SPC_REF_V2`
+  (legacy) in `config.sh` and **re-verify the patches still match**: for v3,
+  `apply-spc-v3-patches.sh`; for v2, the `apply-*-patch.sh` scripts. Every patch
+  fails the build loudly if it no-ops.
 
 ## Local checks
 

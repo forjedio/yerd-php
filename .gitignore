@@ -4,6 +4,7 @@
 *.minisig
 # Build tree & artifacts
 /static-php-cli/
+/static-php-cli-v3/
 /downloads/
 /buildroot/
 /dist/

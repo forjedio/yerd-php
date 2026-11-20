@@ -108,10 +108,23 @@ WINDOWS_IMAGICK="3.8.1"
 # (curl.php is under upstream refactor — RFC #959/#963). The §3 patch step
 # fails the build if the patch matches nothing, and §5 is the runtime backstop.
 SPC_REPO="https://github.com/crazywhalecc/static-php-cli.git"
-# 2.8.5 is the first ref that supports PHP 8.5 (2.7.x tops out at 8.4). The §3
-# patch (apply-curl-patch.sh) is verified against this ref's curl.php layout;
-# re-verify on every bump — the c-ares option location is under upstream churn.
-SPC_REF="2.8.5"
+# Two spc generations are in use, selected per channel (SPC_GEN / SPC_REF are set
+# in the channel case block below):
+#
+#   v2 (legacy channel): 2.8.5 — the last 2.x tag. v3 dropped PHP 7.4 and 8.0, so
+#     EOL minors stay here. Patched by the apply-*-patch.sh scripts (curl c-ares,
+#     ldap/swoole pins, swoole stdext, imap extract, legacy cflags/libxml) plus the
+#     spc-patch-*.php --with-added-patch hooks.
+#   v3 (stable channel): the ground-up "StaticPHP" rewrite on the `v3` branch. It
+#     is the only spc line that builds PHP 8.6 (8.6 compat landed in PR #1226; the
+#     2.x line, main included, stops at 8.5). v3 has NO release tags yet, so it is
+#     pinned by commit SHA. Patched by apply-spc-v3-patches.sh (one script, fails
+#     loud per patch). v3 builds Linux glibc with its zig toolchain
+#     (SPC_TARGET=<arch>-linux-gnu.2.17) — no gnu-docker wrapper.
+# Re-verify the patches on every bump of either ref; each fails the build if it
+# no-ops, and §5 of verify-artifact.sh is the runtime backstop.
+SPC_REF_V2="2.8.5"
+SPC_REF_V3="c8eb4459cbdffdec9889a080000a5a7e97577504"   # v3 branch, 2026-11-20
 
 # --- Cross-repo ABI partner (§5.4) --------------------------------------------
 # forjedio/yerd-php-ext publishes yerd-dump.so / pcov.so that get dlopen'ed into
@@ -150,12 +163,14 @@ case "$CHANNEL" in
     EXTENSIONS="$STABLE_EXTENSIONS"
     MANIFEST_NAME="php.json"
     WINDOWS_MANIFEST_NAME="php-windows.json"
+    SPC_GEN=3; SPC_REF="$SPC_REF_V3"
     ;;
   legacy)
     SUPPORTED_MINORS="$LEGACY_MINORS"
     EXTENSIONS="$LEGACY_EXTENSIONS"
     MANIFEST_NAME="php-legacy.json"
     WINDOWS_MANIFEST_NAME="php-windows-legacy.json"
+    SPC_GEN=2; SPC_REF="$SPC_REF_V2"
     ;;
   *) echo "FATAL: unknown CHANNEL '$CHANNEL' (want: stable|legacy)" >&2; exit 1 ;;
 esac

@@ -34,28 +34,73 @@ if [ "$OS" = "windows" ]; then
 fi
 
 SPC_DIR="${SPC_DIR:-$PWD/static-php-cli}"
-case "$OS" in
-  macos) CMD="bin/spc" ;;
-  linux) CMD="bin/spc-gnu-docker" ;;   # glibc container, NOT musl (§1 hard req)
-  *) echo "FATAL: unknown os '$OS'"; exit 1 ;;
-esac
+case "$OS" in macos|linux) : ;; *) echo "FATAL: unknown os '$OS'"; exit 1 ;; esac
 
 # --- Obtain the pinned static-php-cli checkout --------------------------------
+# init + fetch rather than `clone --branch`: SPC_REF is a tag for v2 but a commit
+# SHA for v3 (no v3 tags yet), and `clone --branch` can't take a SHA. checkout -f
+# also reverts every tracked file a previous run patched (config/, src/).
 if [ ! -d "$SPC_DIR/.git" ]; then
-  git clone --depth 1 --branch "$SPC_REF" "$SPC_REPO" "$SPC_DIR"
-else
-  git -C "$SPC_DIR" fetch --depth 1 origin "$SPC_REF"
-  git -C "$SPC_DIR" checkout -f FETCH_HEAD
-  git -C "$SPC_DIR" clean -fdx src   # drop any prior .bak / patch residue
+  git init -q "$SPC_DIR"
+  git -C "$SPC_DIR" remote add origin "$SPC_REPO"
 fi
+git -C "$SPC_DIR" fetch --depth 1 origin "$SPC_REF"
+git -C "$SPC_DIR" checkout -q -f FETCH_HEAD
+git -C "$SPC_DIR" clean -fdx src   # drop any prior .bak / patch residue
 
 cd "$SPC_DIR"
 
 # static-php-cli is a Composer project: a git checkout has no vendor/, so bin/spc
-# can't autoload until its deps are installed. (The gnu-docker wrapper installs
+# can't autoload until its deps are installed. (The v2 gnu-docker wrapper installs
 # deps inside the container, but the native bin/spc runs on the host and needs
-# this.) Canonical setup step — must run before any bin/spc invocation.
+# this.) Canonical setup step — must run before any bin/spc invocation. v3 needs
+# PHP >= 8.4 on the host (CI's setup-php provides 8.4).
 composer install --no-dev --no-interaction --optimize-autoloader
+
+# Effective extension set for THIS minor — never $EXTENSIONS directly (an EOL
+# minor may reject a member the rest of the channel keeps, e.g. opcache on 7.4).
+EXTS="$(extensions_for_minor "$MINOR")"
+
+# --- spc v3 (stable channel) --------------------------------------------------
+# See SPC_REF_V3 in config.sh. All yerd patches live in apply-spc-v3-patches.sh;
+# v3's build:php downloads what it needs itself (no separate `spc download`), and
+# its php-src cache is keyed on the requested minor, so switching minors in one
+# checkout re-fetches rather than silently rebuilding the old version.
+if [ "$SPC_GEN" = "3" ]; then
+  bash "$here/apply-spc-v3-patches.sh" "$SPC_DIR" "$OS"
+
+  # Linux: glibc, NOT musl (§1 hard req). v3's zig toolchain targets glibc 2.17 —
+  # the same floor the 2.x gnu-docker (CentOS 7) image produced.
+  if [ "$OS" = "linux" ]; then
+    case "$(uname -m)" in
+      x86_64|amd64)  SPC_TARGET="x86_64-linux-gnu.2.17" ;;
+      aarch64|arm64) SPC_TARGET="aarch64-linux-gnu.2.17" ;;
+      *) echo "FATAL: unsupported linux arch $(uname -m)"; exit 1 ;;
+    esac
+    export SPC_TARGET
+  fi
+
+  bin/spc doctor --auto-fix
+  # --with-suggests is v3's merge of v2's --with-suggested-libs/-exts; §5.2 of
+  # verify-artifact.sh asserts the resulting module set.
+  bin/spc build:php "$EXTS" --build-cli --build-fpm --with-suggests \
+    --dl-with-php="$MINOR" --dl-prefer-binary --dl-retry=5
+
+  for b in buildroot/bin/php buildroot/bin/php-fpm; do
+    [ -f "$b" ] || { echo "FATAL: expected artifact $b missing after build"; exit 1; }
+  done
+  if [ "$OS" = "macos" ]; then
+    "$here/sign-macos.sh" buildroot/bin/php buildroot/bin/php-fpm
+  fi
+  echo "build-target: $MINOR/$OS complete (spc v3) -> $SPC_DIR/buildroot/bin/{php,php-fpm}"
+  exit 0
+fi
+
+# --- spc v2 (legacy channel) --------------------------------------------------
+case "$OS" in
+  macos) CMD="bin/spc" ;;
+  linux) CMD="bin/spc-gnu-docker" ;;   # glibc container, NOT musl (§1 hard req)
+esac
 
 # ALL CHANNELS — pin OpenLDAP to 2.6.14 in config/source.json BEFORE `spc download`
 # reads it. spc sources ldap as an unpinned `filelist`, so it rolled onto OpenLDAP
@@ -96,10 +141,6 @@ if [ "${CHANNEL:-stable}" = "legacy" ]; then
   bash "$here/apply-legacy-cflags-patch.sh" "$SPC_DIR" "$OS"
   bash "$here/apply-legacy-libxml-patch.sh" "$SPC_DIR"
 fi
-
-# Effective extension set for THIS minor — never $EXTENSIONS directly (an EOL
-# minor may reject a member the rest of the channel keeps, e.g. opcache on 7.4).
-EXTS="$(extensions_for_minor "$MINOR")"
 
 # --- Build pipeline (§4) ------------------------------------------------------
 "$CMD" doctor --auto-fix
