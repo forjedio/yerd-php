@@ -55,7 +55,20 @@ generation; every other script is channel-agnostic.
 so it is pinned by commit SHA (`SPC_REF_V3`). Its patches all live in
 `apply-spc-v3-patches.sh`. On Linux, v3 targets glibc 2.17 through its zig
 toolchain (`SPC_TARGET=<arch>-linux-gnu.2.17`), not the 2.x gnu-docker container.
-`legacy` stays on **2.8.5** (`SPC_REF_V2`), because v3 dropped PHP 7.4 and 8.0. `publish.sh` prunes against the **union** of both manifests so
+`legacy` stays on **2.8.5** (`SPC_REF_V2`), because v3 dropped PHP 7.4 and 8.0.
+
+**PHP 8.6 exceptions.** 8.6 arrived before the PECL ecosystem caught up, so for
+8.6 only:
+- **No swoole** (and no `swoole-hook-mysql`). Every swoole release hard-errors on
+  PHP 8.6. They're dropped in `extensions_for_minor()`; re-add them once swoole
+  supports 8.6.
+- **phpredis comes from a pinned `develop` commit** (`REDIS_PHP86_SHA` in
+  `apply-spc-v3-patches.sh`), because 6.3.0 predates 8.6's session handler API change.
+- **`spc-v3-php86-compat.php`** restores the aliases 8.6 removed (`zval_dtor`,
+  `INI_STR`, …) for the static apcu/redis/imap/protobuf builds, and fixes
+  apcu's `php_verror()` call.
+
+Drop each exception when the extension ships an 8.6-capable release. `publish.sh` prunes against the **union** of both manifests so
 one channel never deletes the other's tarballs.
 
 Legacy also runs one extra build step: `apply-legacy-cflags-patch.sh` forces
@@ -85,6 +98,7 @@ php-cgi needs `ffi.enable=true`, which is a yerd daemon follow-up.
 | `scripts/resolve-builds.php` | §7 | Decide what to build + each `revision` (reads previous manifest) |
 | `scripts/build-target.sh` | §4 | Clone pinned spc → patch → download → build → sign (v3 for stable, v2 for legacy) |
 | `scripts/apply-spc-v3-patches.sh` | §3 | **stable / spc v3**: curl `ENABLE_ARES=OFF`, swoole stdext off, ldap + swoole pins, Linux `--exclude-libs`; **fail if any no-ops** |
+| `scripts/spc-v3-php86-compat.php` | 8.6 | Restore aliases removed in PHP 8.6 + apcu `php_verror` fix for static PECL builds (hooked in by the v3 patch script) |
 | `scripts/apply-curl-patch.sh` | §3 | **legacy / spc v2**: force `ENABLE_ARES=OFF`; **fail if it no-ops** |
 | `scripts/apply-ldap-pin-patch.sh` | §3 | **legacy / spc v2**: pin OpenLDAP to 2.6.14 (2.7.0's `tls_o.c` breaks under gnu17); **fail if it no-ops** |
 | `scripts/apply-legacy-cflags-patch.sh` | legacy | Force `-std=gnu17` for EOL php-src (K&R libbcmath vs C23); **fail if it no-ops** |

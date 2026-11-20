@@ -192,6 +192,10 @@ WINDOWS_MANIFEST_SIG_NAME="$WINDOWS_MANIFEST_NAME.minisig" # windows manifest (b
 #                      arginfo_offsetGet / parse errors — its generated arginfo
 #                      needs 8.1+). PECL declares min-php 8.2; only 8.1 (the newest
 #                      legacy minor, already published) actually builds it.
+#   - swoole on 8.6:   EVERY swoole release (6.2.x, 6.3.0-rc2, master as of
+#                      2026-11-20) has `#error "require PHP version 8.5 or earlier"`.
+#                      swoole-hook-mysql depends on it, so both go. Re-add when a
+#                      swoole release supports 8.6 (stable channel, spc v3).
 # So: 7.4 drops opcache+protobuf; 8.0 drops protobuf; 8.1 keeps everything. (opcache
 # and protobuf are the only LEGACY_EXTENSIONS with a throwing spc *validate()* gate
 # — verified by sweeping src/SPC/builder/extension/*.php; the 8.0 protobuf drop is
@@ -208,6 +212,10 @@ extensions_for_minor() {
       ;;
     8.0)                                  # protobuf 5.34.1 won't compile on 8.0
       exts="${exts//,protobuf,/,}"
+      ;;
+    8.6)                                  # no swoole release supports PHP 8.6 yet
+      exts="${exts//,swoole-hook-mysql,/,}"
+      exts="${exts//,swoole,/,}"
       ;;
   esac
   exts="${exts#,}"; exts="${exts%,}"      # trim the sentinel commas

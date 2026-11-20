@@ -67,7 +67,7 @@ EXTS="$(extensions_for_minor "$MINOR")"
 # its php-src cache is keyed on the requested minor, so switching minors in one
 # checkout re-fetches rather than silently rebuilding the old version.
 if [ "$SPC_GEN" = "3" ]; then
-  bash "$here/apply-spc-v3-patches.sh" "$SPC_DIR" "$OS"
+  bash "$here/apply-spc-v3-patches.sh" "$SPC_DIR" "$OS" "$MINOR"
 
   # Linux: glibc, NOT musl (§1 hard req). v3's zig toolchain targets glibc 2.17 —
   # the same floor the 2.x gnu-docker (CentOS 7) image produced.
@@ -80,6 +80,25 @@ if [ "$SPC_GEN" = "3" ]; then
     export SPC_TARGET
   fi
 
+  # v3 SYMLINKS ext sources into php-src/ext (ext/apcu -> source/ext-apcu) and
+  # keeps source/ext-* across runs, so in a reused checkout (local builds; CI is
+  # fresh per job) one minor's ext source — or a per-minor pin such as the 8.6
+  # phpredis commit — leaks into the next minor's build. Clear the extracted
+  # sources when the minor changes; downloads/ stays, so re-extracting is cheap.
+  stamp="$SPC_DIR/.yerd-last-minor"
+  if [ -f "$stamp" ] && [ "$(cat "$stamp")" != "$MINOR" ]; then
+    echo "build-target: minor changed ($(cat "$stamp") -> $MINOR); clearing extracted php-src + ext sources"
+    rm -rf source/php-src source/ext-*
+    # Artifacts whose SOURCE differs per minor (apply-spc-v3-patches.sh #9): v3
+    # doesn't invalidate a cache entry when the source TYPE changes (url -> pie),
+    # so 8.5 after 8.6 would silently reuse the 8.6 phpredis pin. Drop the entry.
+    php -r '$f = "downloads/.cache.json"; if (!is_file($f)) exit;
+      $c = json_decode(file_get_contents($f), true) ?: [];
+      foreach (["ext-redis"] as $a) unset($c[$a]);
+      file_put_contents($f, json_encode($c, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));'
+  fi
+  rm -f "$stamp"
+
   bin/spc doctor --auto-fix
   # --with-suggests is v3's merge of v2's --with-suggested-libs/-exts; §5.2 of
   # verify-artifact.sh asserts the resulting module set.
@@ -89,6 +108,7 @@ if [ "$SPC_GEN" = "3" ]; then
   for b in buildroot/bin/php buildroot/bin/php-fpm; do
     [ -f "$b" ] || { echo "FATAL: expected artifact $b missing after build"; exit 1; }
   done
+  echo "$MINOR" > "$stamp"
   if [ "$OS" = "macos" ]; then
     "$here/sign-macos.sh" buildroot/bin/php buildroot/bin/php-fpm
   fi

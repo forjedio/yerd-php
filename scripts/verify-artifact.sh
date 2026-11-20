@@ -230,8 +230,17 @@ fi
 
 if [ -n "$so" ]; then
   echo "  loading real ext: $so"
-  loaded="$("$PHP" -d "extension=$so" -m 2>/dev/null | grep -i "yerd\|pcov" || true)"
-  [ -n "$loaded" ] || fail "yerd-php-ext .so did not load (ABI mismatch) — $so"
+  # A failed load prints "Unable to load dynamic library '<path>/yerd-dump-...so'"
+  # to stdout — and that path contains "yerd", so grepping -m output for the name
+  # passes on failure. Instead: require NO load warning, and a module that is
+  # present WITH the extension and absent without it.
+  base="$("$PHP" -m 2>/dev/null | sort -u)"
+  with="$("$PHP" -d display_startup_errors=1 -d "extension=$so" -m 2>&1)"
+  if grep -qi "unable to load\|symbol not found\|undefined symbol" <<<"$with"; then
+    fail "yerd-php-ext .so did not load — $so: $(grep -i -m1 "unable to load\|symbol not found\|undefined symbol" <<<"$with" | cut -c1-300)"
+  fi
+  loaded="$(comm -13 <(echo "$base") <(grep -v '^\[' <<<"$with" | grep -v '^$' | sort -u) | tr '\n' ' ')"
+  [ -n "${loaded// /}" ] || fail "yerd-php-ext .so loaded no new module (ABI mismatch?) — $so"
   echo "  real-ext load OK: $loaded"
 else
   # Fallback: assert the built PHP's ZEND_MODULE_API_NO matches what yerd-php-ext
