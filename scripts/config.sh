@@ -19,7 +19,7 @@ CHANNEL="${CHANNEL:-stable}"
 # --- Supported PHP minors, per channel (§2) -----------------------------------
 # stable: every minor >= 8.2 that upstream still supports. 8.2 is yerd's floor.
 #   Add a minor when it GAs; drop it when it EOLs below the floor.
-STABLE_MINORS="8.2 8.3 8.4 8.5"
+STABLE_MINORS="8.2 8.3 8.4 8.5 8.6"
 # legacy: EOL minors we still offer as a hideable tier. spc 2.8.5 can still build
 # these; drop one when spc drops support for it.
 LEGACY_MINORS="7.4 8.0 8.1"
@@ -123,7 +123,7 @@ EXT_REPO="forjedio/yerd-php-ext"
 # stable minors the authoritative source is yerd-php-ext's build config — verify
 # there, don't trust these blindly. The legacy (7.4/8.0/8.1) numbers are PHP's own
 # published values (no ext partner to reconcile with). Format: "<minor>:<api_no>".
-ZEND_API_NOS="7.4:20190902 8.0:20200930 8.1:20210902 8.2:20220829 8.3:20230831 8.4:20240924 8.5:20250925"
+ZEND_API_NOS="7.4:20190902 8.0:20200930 8.1:20210902 8.2:20220829 8.3:20230831 8.4:20240924 8.5:20250925 8.6:20261112"
 
 # --- Release model (§6) --------------------------------------------------------
 RELEASE_TAG="php"                     # single rolling release; create once, never delete

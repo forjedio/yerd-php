@@ -43,7 +43,7 @@ independently:
 
 | Channel | Minors | Manifest | Extensions | ext partner |
 |---|---|---|---|---|
-| `stable` | 8.2 – 8.5 | `php.json` | full set | yerd-dump / pcov |
+| `stable` | 8.2 – 8.6 | `php.json` | full set | yerd-dump / pcov |
 | `legacy` | 7.4 / 8.0 / 8.1 | `php-legacy.json` | trimmed (no `opentelemetry`, no `swoole`) | none (EOL) |
 
 The channel is a single switch in `scripts/config.sh` (`CHANNEL=stable|legacy`)
@@ -127,7 +127,7 @@ knobs; defaults to `stable`):
 bash scripts/targets-json.sh
 CHANNEL=stable bash -c 'source scripts/config.sh; echo "$SUPPORTED_MINORS -> $MANIFEST_NAME"'
 CHANNEL=legacy bash -c 'source scripts/config.sh; echo "$SUPPORTED_MINORS -> $MANIFEST_NAME"'
-php  scripts/resolve-builds.php --latest=latest.json --targets=targets.json --minors="8.2 8.3 8.4 8.5"
+php  scripts/resolve-builds.php --latest=latest.json --targets=targets.json --minors="8.2 8.3 8.4 8.5 8.6"
 php  scripts/generate-manifest.php --built=matrix.json --assets-dir=dist --minors="7.4 8.0 8.1"
 ```
 

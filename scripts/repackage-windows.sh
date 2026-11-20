@@ -27,12 +27,13 @@ OUT="${3:?out-dir}"
 
 MINOR="${VER%.*}"
 # windows.php.net tags each build with the VS toolset it was compiled with. PHP
-# switched to VS17 (VS2022) at 8.4 and to VS16 (VS2019) at 8.0; 7.x is VC15
-# (VS2017). This covers the stable (8.2-8.5) and legacy (7.4/8.0/8.1) minors.
+# switched to VS18 at 8.6, VS17 (VS2022) at 8.4 and VS16 (VS2019) at 8.0; 7.x is VC15
+# (VS2017). This covers the stable (8.2-8.6) and legacy (7.4/8.0/8.1) minors.
 case "$MINOR" in
   7.4)             VSTAG="vc15" ;;
   8.0|8.1|8.2|8.3) VSTAG="vs16" ;;
   8.4|8.5)         VSTAG="vs17" ;;
+  8.6)             VSTAG="vs18" ;;
   *) echo "FATAL: no known VS toolset tag for PHP $MINOR on windows (add it)"; exit 1 ;;
 esac
 

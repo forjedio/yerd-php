@@ -161,21 +161,22 @@ the directory tarball. `generate-manifest.php` handles both.
 ## Version and toolset resolution
 
 The filename on windows.php.net encodes the VS toolset the build was compiled
-with. PHP switched to VS17 (Visual Studio 2022) at 8.4 and to VS16 (VS2019) at
-8.0; 7.x is VC15 (VS2017). So:
+with. PHP switched to VS18 (Visual Studio 2026) at 8.6, to VS17 (Visual Studio
+2022) at 8.4 and to VS16 (VS2019) at 8.0; 7.x is VC15 (VS2017). So:
 
 | PHP minor      | VS tag |
 |----------------|--------|
 | 7.4            | vc15   |
 | 8.0, 8.1, 8.2, 8.3 | vs16 |
 | 8.4, 8.5       | vs17   |
+| 8.6            | vs18   |
 
 `repackage-windows.sh` maps the minor to the tag and downloads from the current
 `releases/` directory, falling back to `releases/archives/` for older patches.
 
 ## Channels
 
-Windows builds in both channels. The stable channel covers 8.2 through 8.5 and
+Windows builds in both channels. The stable channel covers 8.2 through 8.6 and
 the legacy channel covers 7.4, 8.0, and 8.1. Unlike the Unix legacy build, which
 needs a stack of source patches to compile EOL PHP with static-php-cli, a legacy
 Windows build is just another official download, so there is nothing special to

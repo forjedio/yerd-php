@@ -12,7 +12,7 @@
  *
  * Usage:
  *   php generate-manifest.php --built=built.json --assets-dir=dist \
- *       --minors="8.2 8.3 8.4 8.5" [--old-manifest=old.json] \
+ *       --minors="8.2 8.3 8.4 8.5 8.6" [--old-manifest=old.json] \
  *       [--generated-at=2026-07-01T00:00:00Z] [--schema=1]
  *
  * --built is the resolve-builds matrix .include array (or any array of

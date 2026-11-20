@@ -15,7 +15,7 @@
  *
  * Usage:
  *   php resolve-builds.php --latest=latest.json --targets=targets.json \
- *       --minors="8.2 8.3 8.4 8.5" [--old-manifest=old.json] [--only-minor=8.4] \
+ *       --minors="8.2 8.3 8.4 8.5 8.6" [--old-manifest=old.json] [--only-minor=8.4] \
  *       [--only-target=macos-aarch64] [--force]
  *
  * --only-target restricts to a single "<os>-<arch>" (e.g. for iterating on a
